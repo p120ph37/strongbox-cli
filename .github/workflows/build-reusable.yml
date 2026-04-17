@@ -1,0 +1,107 @@
+name: Build (reusable)
+
+# Single source of truth for the matrix build job shared by:
+#   - build.yml    (push / PR)
+#   - release.yml  (tagged release from CHANGELOG.md)
+#
+# Both callers reference this via `uses: ./.github/workflows/build-reusable.yml`.
+# Artifacts uploaded here (`test-results-*`) are visible to subsequent jobs in
+# the caller via `actions/download-artifact`.
+#
+# Matrix is macOS-only because Strongbox only runs on Apple platforms; there
+# is no integration surface to test on Linux or Windows.  We still compile and
+# unit-test on ubuntu-latest for CI speed — the transport/crypto/framing code
+# is pure TypeScript and runs identically anywhere Bun runs.
+
+on:
+  workflow_call:
+
+env:
+  HOST_NODE_VERSION: "22"
+
+jobs:
+  build:
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Fast unit-test cell.  No Strongbox, no integration tests.
+          - os: ubuntu-22.04
+            arch: x64
+            integration: "false"
+          # macOS arm64.  Same unit tests; integration tests stay gated on the
+          # STRONGBOX_CLI_INTEGRATION env var (which we do NOT set in CI) since
+          # no GitHub-hosted runner can have Strongbox Pro installed.
+          - os: macos-15
+            arch: arm64
+            integration: "false"
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: ${{ env.HOST_NODE_VERSION }}
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - run: bun install --frozen-lockfile --ignore-scripts
+
+      - name: Typecheck
+        run: bun run typecheck
+
+      - name: Build
+        run: bun run build
+
+      - name: Run tests
+        run: |
+          JUNIT_DIR="${RUNNER_TEMP}/junit"
+          COV_DIR="${RUNNER_TEMP}/coverage"
+          mkdir -p "$JUNIT_DIR" "$COV_DIR"
+          TEST_LOG="${RUNNER_TEMP}/test-output.txt"
+          : > "$TEST_LOG"
+
+          JUNIT_FILE="$JUNIT_DIR/strongbox-cli-${{ matrix.os }}-${{ matrix.arch }}.xml"
+
+          bun test \
+            --coverage --coverage-reporter=lcov --coverage-dir="$COV_DIR" \
+            --reporter=junit --reporter-outfile="$JUNIT_FILE" \
+            2>&1 | tee -a "$TEST_LOG"
+          RC="${PIPESTATUS[0]}"
+
+          # Guard against startup-crash hiding as empty junit.  Borrowed from
+          # mechatron's CI: a bun test that exits non-zero without producing
+          # any <testcase> elements would otherwise be reported as "0 tests"
+          # in the PR summary and look green.
+          if [ "$RC" != 0 ] && ! grep -q "<testcase" "$JUNIT_FILE" 2>/dev/null; then
+            MSG="bun test exited ${RC} without producing a JUnit report - the runner crashed before tests could execute (see test-output.txt artifact)."
+            {
+              printf '<?xml version="1.0" encoding="UTF-8"?>\n'
+              printf '<testsuites tests="1" failures="1">\n'
+              printf '  <testsuite name="startup" tests="1" failures="1">\n'
+              printf '    <testcase name="bun test startup" classname="startup" time="0">\n'
+              printf '      <failure message="%s"/>\n' "$MSG"
+              printf '    </testcase>\n'
+              printf '  </testsuite>\n'
+              printf '</testsuites>\n'
+            } > "$JUNIT_FILE"
+          fi
+
+          exit "$RC"
+
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: test-results-${{ matrix.os }}-${{ matrix.arch }}
+          path: |
+            ${{ runner.temp }}/test-output.txt
+            ${{ runner.temp }}/junit/
+            ${{ runner.temp }}/coverage/
+          if-no-files-found: ignore

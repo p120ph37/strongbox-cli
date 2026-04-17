@@ -1,0 +1,62 @@
+{
+  "name": "strongbox-cli",
+  "version": "0.0.1",
+  "description": "Independent CLI client for the Strongbox password manager",
+  "type": "module",
+  "license": "MIT",
+  "author": "",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/p120ph37/strongbox-cli.git"
+  },
+  "bugs": {
+    "url": "https://github.com/p120ph37/strongbox-cli/issues"
+  },
+  "homepage": "https://github.com/p120ph37/strongbox-cli#readme",
+  "keywords": [
+    "strongbox",
+    "password-manager",
+    "keepass",
+    "cli",
+    "macos"
+  ],
+  "bin": {
+    "strongbox-cli": "./bin/strongbox-cli"
+  },
+  "files": [
+    "bin/",
+    "src/",
+    "README.md",
+    "LICENSE",
+    "CHANGELOG.md"
+  ],
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  },
+  "scripts": {
+    "build": "bun build ./src/cli.ts --target=bun --outfile=./bin/strongbox-cli",
+    "dev": "bun run ./src/cli.ts",
+    "test": "bun test",
+    "test:integration": "STRONGBOX_CLI_INTEGRATION=1 bun test tests/integration",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint src tests",
+    "format": "prettier --write src tests docs *.md"
+  },
+  "engines": {
+    "bun": ">=1.1.0"
+  },
+  "dependencies": {
+    "commander": "^12.1.0",
+    "libsodium-wrappers-sumo": "^0.7.13"
+  },
+  "devDependencies": {
+    "@types/bun": "latest",
+    "@types/libsodium-wrappers-sumo": "^0.7.8",
+    "@typescript-eslint/eslint-plugin": "^7.0.0",
+    "@typescript-eslint/parser": "^7.0.0",
+    "eslint": "^8.57.0",
+    "prettier": "^3.3.0",
+    "typescript": "^5.5.0"
+  }
+}

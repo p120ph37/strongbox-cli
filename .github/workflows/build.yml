@@ -1,0 +1,185 @@
+name: Build
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  build:
+    uses: ./.github/workflows/build-reusable.yml
+
+  test-summary:
+    if: always()
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: test-results-*
+          path: results
+
+      - name: Build comment body
+        run: |
+          cat <<'SCRIPT' > summary.js
+          const fs = require("fs"), path = require("path");
+          const resultsDir = "results";
+
+          let comment = "";
+          let allPassed = true;
+          let anyResults = false;
+
+          // Aggregate per-line hit counts across all cells so a line counts
+          // as covered if any platform exercised it.
+          const combined = {}; // sf -> { lines: { ln -> {hits, emitters} }, parsers: Set }
+
+          const dirs = fs.readdirSync(resultsDir).filter(d =>
+            d.startsWith("test-results-") && fs.statSync(path.join(resultsDir, d)).isDirectory()
+          ).sort();
+
+          for (const dir of dirs) {
+            const platform = dir.replace("test-results-", "").replace(/-(?=[^-]*$)/, " / ");
+            const junitDir = path.join(resultsDir, dir, "junit");
+            const covDir = path.join(resultsDir, dir, "coverage");
+
+            // Parse JUnit
+            let pass = 0, fail = 0, skip = 0;
+            const rows = [];
+            try {
+              const xmlFiles = fs.readdirSync(junitDir).filter(f => f.endsWith(".xml"));
+              for (const xf of xmlFiles) {
+                const xml = fs.readFileSync(path.join(junitDir, xf), "utf8");
+                const re = /<testcase name="([^"]+)"[^>]*time="([^"]+)"[^>]*(\/\s*>|>[\s\S]*?<\/testcase>)/g;
+                let m;
+                while ((m = re.exec(xml)) !== null) {
+                  const name = m[1], time = m[2], body = m[3];
+                  const skipped = body.includes("<skipped");
+                  const failed = body.includes("<failure");
+                  if (failed) { fail++; allPassed = false; }
+                  else if (skipped) { skip++; }
+                  else { pass++; }
+                  const icon = failed ? ":x:" : skipped ? ":fast_forward:" : ":white_check_mark:";
+                  rows.push(`| ${name} | ${icon} | ${time}s |`);
+                }
+              }
+            } catch (_) {}
+
+            // Parse coverage percentage
+            let covPct = "";
+            try {
+              const lcov = fs.readFileSync(path.join(covDir, "lcov.info"), "utf8");
+              let hit = 0, total = 0;
+              for (const line of lcov.split("\n")) {
+                if (line.startsWith("DA:")) { total++; if (!line.endsWith(",0")) hit++; }
+              }
+              if (total > 0) covPct = (100 * hit / total).toFixed(1) + "%";
+            } catch (_) {}
+
+            const total = pass + fail + skip;
+            if (total === 0) continue;
+            anyResults = true;
+
+            const status = fail > 0 ? ":x:" : ":white_check_mark:";
+            const covStr = covPct ? ` · ${covPct} coverage` : "";
+            const skipStr = skip > 0 ? `, ${skip} skipped` : "";
+            const failStr = fail > 0 ? `, ${fail} failed` : "";
+            comment += `<details>\n`;
+            comment += `<summary>${status} <b>${platform}</b> — ${pass}/${total} passed${failStr}${skipStr}${covStr}</summary>\n\n`;
+            comment += `| Test | Status | Time |\n|------|--------|------|\n`;
+            comment += rows.join("\n") + "\n";
+
+            // Per-file coverage table; also feed into the combined aggregate.
+            if (covPct) {
+              try {
+                const lcov = fs.readFileSync(path.join(covDir, "lcov.info"), "utf8");
+                const files = {};
+                let cur = null, curNorm = null;
+                for (const line of lcov.split("\n")) {
+                  if (line.startsWith("SF:")) {
+                    curNorm = line.slice(3).replace(/^.*[\/\\]src[\/\\]/, "src/").replace(/\\/g, "/");
+                    cur = curNorm;
+                    files[cur] = { hit: 0, total: 0 };
+                    if (!combined[curNorm]) combined[curNorm] = { lines: {}, parsers: new Set() };
+                    combined[curNorm].parsers.add(platform);
+                  } else if (line.startsWith("DA:") && cur) {
+                    const [ln, hits] = line.slice(3).split(",").map(Number);
+                    files[cur].total++;
+                    if (hits > 0) files[cur].hit++;
+                    const rec = combined[curNorm].lines[ln]
+                      || (combined[curNorm].lines[ln] = { hits: 0, emitters: new Set() });
+                    rec.hits += (hits || 0);
+                    rec.emitters.add(platform);
+                  } else if (line === "end_of_record") {
+                    cur = null; curNorm = null;
+                  }
+                }
+                comment += `\n| File | Lines | Coverage |\n|------|------:|----------|\n`;
+                let tH = 0, tL = 0;
+                for (const [f, s] of Object.entries(files).sort()) {
+                  if (s.total === 0) continue;
+                  comment += `| ${f} | ${s.hit}/${s.total} | ${(100*s.hit/s.total).toFixed(1)}% |\n`;
+                  tH += s.hit; tL += s.total;
+                }
+                comment += `| **Total** | **${tH}/${tL}** | **${tL > 0 ? (100*tH/tL).toFixed(1) : "0"}%** |\n`;
+              } catch (_) {}
+            }
+
+            comment += `\n</details>\n\n`;
+          }
+
+          // Combined "all platforms" coverage view — union of per-line hits.
+          const combinedFiles = Object.entries(combined).filter(([, v]) => Object.keys(v.lines).length > 0);
+          if (anyResults && combinedFiles.length > 0) {
+            let tH = 0, tL = 0;
+            const rows = [];
+            for (const [f, { lines, parsers }] of combinedFiles.sort()) {
+              let hit = 0, total = 0;
+              for (const lnStr of Object.keys(lines)) {
+                const { hits, emitters } = lines[lnStr];
+                // Drop phantom-uncovered lines: zero hits everywhere AND at
+                // least one parser didn't emit a DA for this line.
+                if (hits === 0 && emitters.size < parsers.size) continue;
+                total++;
+                if (hits > 0) hit++;
+              }
+              if (total === 0) continue;
+              rows.push(`| ${f} | ${hit}/${total} | ${(100*hit/total).toFixed(1)}% |`);
+              tH += hit; tL += total;
+            }
+            const pct = tL > 0 ? (100*tH/tL).toFixed(1) : "0";
+            comment += `<details>\n`;
+            comment += `<summary>:bar_chart: <b>All platforms (combined)</b> — ${pct}% coverage (${tH}/${tL} lines hit on at least one platform)</summary>\n\n`;
+            comment += `| File | Lines | Coverage |\n|------|------:|----------|\n`;
+            comment += rows.join("\n") + "\n";
+            comment += `| **Total** | **${tH}/${tL}** | **${pct}%** |\n`;
+            comment += `\n</details>\n\n`;
+          }
+
+          if (!anyResults) {
+            comment += "_No test results found in artifacts._\n";
+          }
+
+          const heading = allPassed && anyResults
+            ? ":white_check_mark: All tests passed"
+            : ":x: Some tests failed";
+          comment = `## ${heading}\n\n${comment}`;
+
+          fs.writeFileSync("comment-body.md", comment);
+          fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, comment);
+          SCRIPT
+          node summary.js
+
+      - name: Post PR comment
+        if: github.event_name == 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          gh pr comment "$PR_NUMBER" --body-file comment-body.md --edit-last 2>/dev/null \
+            || gh pr comment "$PR_NUMBER" --body-file comment-body.md

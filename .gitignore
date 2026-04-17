@@ -1,0 +1,18 @@
+node_modules/
+dist/
+bin/strongbox-cli
+.DS_Store
+*.log
+
+# Local capture data — never commit real vault contents
+docs/captures/local/
+*.local.hex
+*.local.json
+
+# Editor
+.vscode/
+.idea/
+*.swp
+
+# Bun
+bun.lockb
