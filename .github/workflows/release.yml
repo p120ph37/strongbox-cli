@@ -1,0 +1,173 @@
+name: Release from Changelog
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  detect-release:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.parse.outputs.version }}
+      prerelease: ${{ steps.parse.outputs.prerelease }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-tags: true
+
+      - name: Parse latest changelog version
+        id: parse
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # Extract the first heading that matches: ## [vX.Y.Z...] - YYYY-MM-DD
+          # The date is required — headings without a date are treated as drafts.
+          HEADING=$(grep -P '^## \[v[^\]]+\]\s+-\s+\d{4}-\d{2}-\d{2}' CHANGELOG.md | head -1)
+
+          if [ -z "$HEADING" ]; then
+            echo "No dated release heading found — nothing to release."
+            echo "version=" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          VERSION=$(echo "$HEADING" | grep -oP '(?<=\[)[^\]]+')
+
+          # Must be valid semver with v prefix
+          if [[ ! "$VERSION" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z0-9._-]+)?$ ]]; then
+            echo "::error::First changelog heading '$VERSION' is not valid semver with v prefix"
+            exit 1
+          fi
+
+          # Check if this tag already exists on the remote.  This must happen
+          # BEFORE the date check below: the grep above picks the first DATED
+          # heading, which for a repo in the normal "drafting the next release"
+          # state will be the previous (already-released) version because the
+          # unreleased draft heading intentionally has no date.  Failing the
+          # date check in that situation would break every push to main until
+          # a new release is cut.
+          if git rev-parse "refs/tags/$VERSION" >/dev/null 2>&1; then
+            echo "Tag $VERSION already exists — skipping release."
+            echo "version=" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          # Check if a GitHub release already exists
+          if gh release view "$VERSION" >/dev/null 2>&1; then
+            echo "::error::GitHub release $VERSION already exists but tag does not — manual cleanup needed"
+            exit 1
+          fi
+
+          # Verify the date is today (UTC ±12h to accommodate any timezone)
+          ENTRY_DATE=$(echo "$HEADING" | grep -oP '\d{4}-\d{2}-\d{2}')
+          YESTERDAY=$(date -u -d '-12 hours' +%Y-%m-%d)
+          TODAY=$(date -u +%Y-%m-%d)
+          TOMORROW=$(date -u -d '+12 hours' +%Y-%m-%d)
+          if [[ "$ENTRY_DATE" != "$YESTERDAY" && "$ENTRY_DATE" != "$TODAY" && "$ENTRY_DATE" != "$TOMORROW" ]]; then
+            echo "::error::Changelog date $ENTRY_DATE does not match today — expected $YESTERDAY, $TODAY, or $TOMORROW"
+            exit 1
+          fi
+
+          PRERELEASE="false"
+          SEMVER="${VERSION#v}"
+          if [[ "$SEMVER" =~ - ]]; then
+            PRERELEASE="true"
+          fi
+
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "prerelease=$PRERELEASE" >> "$GITHUB_OUTPUT"
+          echo "Detected version=$VERSION prerelease=$PRERELEASE"
+
+  build:
+    needs: detect-release
+    if: needs.detect-release.outputs.version != ''
+    uses: ./.github/workflows/build-reusable.yml
+
+  release:
+    needs: [detect-release, build]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      id-token: write
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          token: ${{ secrets.RELEASE_PAT }}
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Ensure npm supports trusted publishing
+        # Trusted publishing / automatic OIDC detection requires npm CLI
+        # v11.5.1 or later (see https://github.blog/changelog/2025-07-31-npm-trusted-publishing-with-oidc-is-generally-available/).
+        # The npm that ships with setup-node@v6 + node 24 is new enough at
+        # time of writing, but belt and braces: force-install the latest.
+        run: npm install -g npm@latest
+
+      - name: Install dependencies and build
+        # Run against the UNMODIFIED package.json so `bun install
+        # --frozen-lockfile` can verify the lockfile.  The "Set package
+        # version" step below edits package.json, but `npm publish` reads
+        # it directly at publish time, so the edits still apply to the
+        # published artifact.
+        run: |
+          bun install --frozen-lockfile --ignore-scripts
+          bun run build
+
+      - name: Set package version
+        run: |
+          VERSION="${{ needs.detect-release.outputs.version }}"
+          SEMVER="${VERSION#v}"
+          npm version "$SEMVER" --no-git-tag-version
+
+      - name: Extract changelog entry
+        id: changelog
+        run: |
+          # Capture everything after the first `## [` heading up to (but not
+          # including) the next one.
+          BODY=$(awk '/^## \[/{if(found) exit; found=1; next} found' CHANGELOG.md)
+          echo "$BODY" > /tmp/release-body.md
+
+      - name: Create Git tag
+        run: |
+          VERSION="${{ needs.detect-release.outputs.version }}"
+          git tag "$VERSION"
+          git push origin "$VERSION"
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_PAT }}
+        run: |
+          VERSION="${{ needs.detect-release.outputs.version }}"
+          PRERELEASE="${{ needs.detect-release.outputs.prerelease }}"
+          FLAGS=""
+          if [ "$PRERELEASE" = "true" ]; then
+            FLAGS="--prerelease"
+          fi
+          gh release create "$VERSION" \
+            --title "$VERSION" \
+            --notes-file /tmp/release-body.md \
+            $FLAGS
+
+      - name: Publish to npm
+        # No NODE_AUTH_TOKEN / NPM_TOKEN.  Trusted publishing uses the
+        # OIDC token minted from `id-token: write` above and matched
+        # against the Trusted Publisher rule configured on npmjs.com:
+        #   Package settings → Trusted Publisher → GitHub Actions
+        #     Organization/user: <your username>
+        #     Repository:        strongbox-cli
+        #     Workflow filename: release.yml
+        #     Environment name:  (leave blank, or match below)
+        # Provenance attestations are generated automatically.
+        run: |
+          TAG="latest"
+          if [ "${{ needs.detect-release.outputs.prerelease }}" = "true" ]; then
+            TAG="next"
+          fi
+          npm publish --access public --tag "$TAG"
