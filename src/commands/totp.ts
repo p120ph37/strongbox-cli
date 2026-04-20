@@ -1,17 +1,19 @@
 import { Command } from 'commander';
-import { applyGlobalOpts, emit, withSession, type GlobalOpts } from './_shared.ts';
-import { Op } from '../protocol/messages.ts';
+import { applyGlobalOpts, type GlobalOpts } from './_shared.ts';
+import { UnimplementedError } from '../util/errors.ts';
 
 export function registerTotpCommand(program: Command): void {
   program
     .command('totp <ref>')
     .description('current TOTP code for an entry')
-    .action(async (ref: string) => {
+    .action((_ref: string) => {
       const parent = program.opts<GlobalOpts>();
       applyGlobalOpts(parent);
-      const result = await withSession((s) =>
-        s.rpc({ id: crypto.randomUUID(), op: Op.getTotp, args: { ref } }),
-      );
-      emit(result, Boolean(parent.json));
+      // The only TOTP-related op observed is messageType=3 (CopyField) with
+      // explicitTotp=true, which injects the code via the OS paste path
+      // rather than returning it. Returning TOTP to stdout needs a
+      // different (unobserved) op, or decoding the stored TOTP URI
+      // client-side from a Credential record.
+      throw new UnimplementedError('totp — no observed return-TOTP messageType');
     });
 }

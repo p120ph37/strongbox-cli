@@ -25,7 +25,7 @@ import {
   NotRunningError,
 } from '../util/errors.ts';
 import { trace } from '../util/log.ts';
-import type { RpcRequest, RpcResponse } from './messages.ts';
+import type { MessageTypeValue, RpcRequestFor, RpcResponseFor } from './messages.ts';
 
 export interface SessionOptions {
   /** Override the binary path. Primarily for tests. */
@@ -88,9 +88,10 @@ export class Session {
    * Send an encrypted RPC and await the response. Throws until the crypto
    * layer and handshake are implemented.
    */
-  async rpc<Op extends string, Args, Result>(
-    _request: RpcRequest<Op, Args>,
-  ): Promise<RpcResponse<Result>> {
+  async rpc<K extends MessageTypeValue>(
+    _messageType: K,
+    _request: RpcRequestFor<K>,
+  ): Promise<RpcResponseFor<K>> {
     throw new UnimplementedError('encrypted RPC');
   }
 

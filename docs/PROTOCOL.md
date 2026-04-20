@@ -139,71 +139,271 @@ Hence: **handshake first, RPCs after.**
 
 Reference: <https://doc.libsodium.org/public-key_cryptography/authenticated_encryption>
 
-### 4.1 Handshake — TBD (observe)
+### 4.1 Envelope shape — observed 2026-04-17
 
-The known ingredients are:
+Every Native Messaging invocation is a **single request / single response**
+round-trip. afproxy is spawned fresh by the browser per message and exits
+after replying. There is no persistent connection, no multi-step handshake,
+and no separate plaintext bootstrap exchange before encrypted traffic
+begins — every envelope carries both sides' public keys and is structurally
+identical.
 
-- Both sides hold an ephemeral Curve25519 keypair generated fresh per session.
-- Both sides must end up knowing the other's public key.
-- There is probably some one-time authorisation step where the user sees a
-  prompt in Strongbox the first time a given browser extension connects, so
-  that the app has some notion of "trusted client public keys" persisted across
-  sessions. (This matches the UX: installing the extension and connecting for
-  the first time pops a Strongbox dialog.)
+Captured on 2026-04-17 across 94 sessions; see
+`docs/captures/2026-04-17-envelope/` for raw hex dumps.
 
-**Possible handshake shapes to verify empirically:**
-
-1. *Simple ephemeral:* extension sends `{type:"hello", pubkey:<32 bytes b64>}`
-   in plaintext; app responds `{type:"hello", pubkey:<32 bytes b64>}` in
-   plaintext; both sides encrypt from message 2 onward.
-2. *TOFU with persisted client identity:* extension has a persisted keypair,
-   sends pubkey once, user accepts in the app UI the first time, app persists
-   the client pubkey, subsequent sessions skip the UI.
-3. *Per-session ephemeral over persisted channel:* persisted keypair used only
-   to bootstrap a fresh per-session ephemeral keypair.
-
-Design (2) is the most plausible given the observed UX. We'll find out which
-one it is by watching the wire. See `docs/REVERSE_ENGINEERING.md`.
-
-### 4.2 Message framing after handshake — TBD (observe)
-
-Each request/response is presumably:
-
-```
-┌──────────────────────┬─────────────┬────────────────────────────────────┐
-│ nonce (24 bytes)     │ length (4)  │ crypto_box ciphertext (length B)   │
-└──────────────────────┴─────────────┴────────────────────────────────────┘
-```
-
-— but that ordering, the nonce generation strategy (random vs. counter), and
-whether the length prefix wraps the whole envelope or just the ciphertext is
-all **TBD (observe)**. Don't guess; capture.
-
-## 5. RPC layer — TBD (observe)
-
-At the semantic level, the extension needs the app to do roughly:
-
-- "Who are you? / are you unlocked? / which databases are available?" (status)
-- "Give me credentials that match this URL" (the main autofill call)
-- "Give me the TOTP for this entry"
-- "Store a new credential" (the 'save password' flow)
-- "Generate a password"
-
-Plausible message shape (JSON inside Crypto Box):
+**Request envelope** (plaintext JSON, wrapped in the uint32-LE Native
+Messaging frame defined in §2):
 
 ```jsonc
-// request
-{ "id": "uuid", "op": "get-credentials-for-url", "args": { "url": "https://…" } }
-
-// response
-{ "id": "uuid", "ok": true, "result": [ /* entries */ ] }
-// or
-{ "id": "uuid", "ok": false, "error": { "code": "…", "message": "…" } }
+{
+  "clientPublicKey": "<base64 32B Curve25519 public key>",
+  "nonce":           "<base64 24B crypto_box nonce>",  // "" on messageType=0
+  "message":         "<base64 crypto_box ciphertext>", // "message" literal on messageType=0
+  "messageType":     <integer>
+}
 ```
 
-But again: until we watch real messages go across, this is a hypothesis to be
-tested, not a spec to be implemented. `src/protocol/messages.ts` will grow
-concrete types as we observe each one.
+**Response envelope** (same framing):
+
+```jsonc
+{
+  "message":         "<base64 crypto_box ciphertext>",
+  "serverPublicKey": "<base64 32B Curve25519 public key>",
+  "errorMessage":    "<string, empty on success>",
+  "success":         <boolean>,
+  "nonce":           "<base64 24B crypto_box nonce>"
+}
+```
+
+The `message` body is a standard libsodium `crypto_box_easy` ciphertext:
+`plaintext_length + 16` bytes (the trailing 16 is the Poly1305 tag).
+Decrypt with `crypto_box_open_easy(ciphertext, nonce, serverPublicKey,
+clientSecretKey)` on the client side (inverse on the server side).
+
+**Key persistence, observed:**
+
+- The server's public key was **identical across all 94 captures**. This is
+  consistent with a long-lived server keypair (TOFU on the server side).
+  Our client can persist its own keypair, transmit it once, and expect to
+  be recognised on subsequent connections without re-prompting.
+- The client's public key rotated across **10 distinct values** in the
+  capture set. The browser extension therefore caches its keypair across
+  several native-host spawns (likely scoped to popup/service-worker
+  lifetime) but not forever.
+
+**Handshake, revised:** design hypothesis (2) from the earlier draft of
+this section (TOFU with persisted client identity, user accepts in the app
+UI on first connection) remains the best fit for the observed UX, but
+there is **no separate handshake message**. The first connection from a
+given clientPublicKey is presumably what triggers the one-time "allow this
+extension?" dialog; subsequent connections go through transparently. To
+be confirmed when we implement from scratch.
+
+### 4.2 `messageType = 0` — Hello
+
+The client sends an unencrypted request: `nonce` is the empty string,
+`message` is the literal ASCII string `"message"`. No `crypto_box` is
+involved on the request side because the client does not yet have the
+server's public key.
+
+The server responds with a standard encrypted envelope: `message` contains
+a `crypto_box` ciphertext (observed plaintext length: 438–439 bytes),
+`serverPublicKey` gives us the server's long-lived pubkey, and `nonce` is
+a real 24-byte nonce. From this response onward the client can encrypt
+`messageType ≥ 2` requests.
+
+The Hello response plaintext was decoded on 2026-04-20 (see §5) and
+carries the database list, a server version string, and a feature-flag
+bag.
+
+### 4.3 `messageType ≥ 2` — encrypted RPC
+
+`message` is a `crypto_box` ciphertext keyed by the stated `nonce`,
+encrypting an inner JSON payload whose shape is now observed for every
+`messageType` the extension emits. Inner schemas and sample payloads are
+enumerated in §5.
+
+## 5. RPC layer — observed messageTypes
+
+Plaintext for every `messageType` the extension emits was decoded on
+2026-04-20 via a back-to-back encryption MitM native host (see
+`docs/REVERSE_ENGINEERING.md` §"Layer D.1 — MitM" and the capture set at
+`docs/captures/2026-04-20-layerD/`). The table below summarises each
+operation; subsections give the full request/response schema and a
+redacted sample.
+
+| mt | operation                  | capture dir                                    |
+| -- | -------------------------- | ---------------------------------------------- |
+| 0  | Hello                      | `2026-04-20-layerD/00-mt0-hello/`              |
+| 2  | Search credentials by URL  | `2026-04-20-layerD/01-mt2-search-url/`         |
+| 3  | Copy field (autofill)      | `2026-04-20-layerD/02-mt3-copy-field/`         |
+| 4  | Unlock database            | `2026-04-20-layerD/03-mt4-unlock-db/`          |
+| 5  | Lock database              | `2026-04-20-layerD/04-mt5-lock-db/`            |
+| 6  | Create entry               | `2026-04-20-layerD/05-mt6-create-entry/`       |
+| 7  | List groups in database    | `2026-04-20-layerD/06-mt7-list-groups/`        |
+| 11 | Generate password          | `2026-04-20-layerD/07-mt11-generate-password/` |
+| 12 | Check password strength    | `2026-04-20-layerD/08-mt12-check-strength/`    |
+| 13 | Prepare create-entry form  | `2026-04-20-layerD/09-mt13-prepare-new-entry/` |
+
+Integer values 1, 8, 9, 10, and anything ≥ 14 were **not** observed on
+the wire; whether they exist and map to ops we haven't triggered is open.
+
+### 5.1 `mt = 0` — Hello
+
+Request: literal bytes `"message"` in the envelope (no inner JSON).
+
+Response:
+
+```jsonc
+{
+  "databases": [
+    { "uuid": "…", "nickName": "vault-a",
+      "locked": true,  "autoFillEnabled": true, "includeFavIconForNewEntries": true },
+    { "uuid": "…", "nickName": "test",
+      "locked": false, "autoFillEnabled": true, "includeFavIconForNewEntries": true }
+  ],
+  "serverVersionInfo": "1.63.1",
+  "serverSettings": {
+    "colorBlindPalette":  false,
+    "supportsCreateNew":  true,
+    "markdownNotes":      true,
+    "colorizePasswords":  true
+  }
+}
+```
+
+### 5.2 `mt = 2` — Search credentials by URL
+
+Request: `{ "url": "...", "skip": 0, "take": 9 }` (observed pagination
+values; larger `take` untested).
+
+Response: `{ "results": [...], "unlockedDatabaseCount": <int> }`. Every
+capture we have returned `results: []`; the element type is therefore
+**unconfirmed** — typed as `unknown[]` in `src/protocol/messages.ts`
+until a non-empty search is captured. Best guess is `Credential[]` (see
+§5.6).
+
+### 5.3 `mt = 3` — Copy field
+
+The extension asks the server to inject a specific field of a specific
+entry via the OS paste/keyboard path. The response only confirms success;
+the value is not returned.
+
+Request:
+
+```jsonc
+{
+  "databaseId":   "…",   // UUID of an unlocked database
+  "nodeId":       "…",   // UUID of the entry within that database
+  "explicitTotp": false,
+  "field":        2      // integer selector; 2 = password (only value observed)
+}
+```
+
+Response: `{ "success": true }`.
+
+### 5.4 `mt = 4` — Unlock database &nbsp;·&nbsp; `mt = 5` — Lock database
+
+Request for both: `{ "databaseId": "…" }`.
+Response for both: `{ "success": true }`.
+
+Unlocking a locked database triggers the Strongbox UI to prompt for the
+master password; the native host doesn't return until that flow resolves.
+
+### 5.5 `mt = 6` — Create entry
+
+Request:
+
+```jsonc
+{
+  "databaseId": "…",
+  "groupId":    "…",                      // from mt=7 ListGroups
+  "icon":       "data:image/png;base64,…", // PNG data URL; ~5 KiB typical
+  "title":      "…",
+  "username":   "…",
+  "password":   "…",
+  "url":        "…"
+}
+```
+
+Response: `{ "uuid": "…", "credential": <Credential> }` where
+`Credential` has the full set of fields shown in §5.6.
+
+### 5.6 `Credential` record (used by mt=6 response and likely mt=2)
+
+```jsonc
+{
+  "uuid":                "…",
+  "databaseId":          "…",
+  "databaseName":        "test",
+  "title":               "…",
+  "username":            "…",
+  "password":            "…",
+  "url":                 "…",
+  "totp":                "",               // empty when unset
+  "notes":               "",
+  "favourite":           false,
+  "tags":                [],
+  "customFields":        [],               // element shape unconfirmed
+  "attachmentFileNames": [],
+  "icon":                "data:image/png;base64,…",
+  "modified":            "Today at 5:17 PM" // human-formatted; NOT ISO 8601
+}
+```
+
+### 5.7 `mt = 7` — List groups
+
+Request: `{ "databaseId": "…" }`.
+Response: `{ "groups": [ { "uuid": "…", "title": "…" }, … ] }`.
+
+### 5.8 `mt = 11` — Generate password
+
+Request: `{}`. Response:
+
+```jsonc
+{
+  "password":     { "password": "…", "strength": { "entropy": 84.3, "category": "Strong", "summaryString": "Strong (15 / 84.3 bits / >100m years)" } },
+  "alternatives": [
+    { "password": "…", "strength": { "entropy": 88.7, "category": "Strong", "summaryString": "…" } }
+    /* …N more alternates; exact N not established… */
+  ]
+}
+```
+
+### 5.9 `mt = 12` — Check password strength
+
+Request: `{ "password": "…" }` (the extension sends one request per
+keystroke in the password field, so expect N invocations for an
+N-character typed password).
+
+Response: `{ "strength": { "entropy": 10.2, "category": "Very Weak", "summaryString": "Very Weak (3 / 10.2 bits / 0s)" } }`.
+
+### 5.10 `mt = 13` — Prepare create-entry form
+
+Loaded once when the create-entry UI opens, to preseed username and
+password fields.
+
+Request: `{ "databaseId": "…" }`. Response:
+
+```jsonc
+{
+  "mostPopularUsernames": ["username", "tomsmith"],
+  "username":             "username",
+  "password": {
+    "password": "…",
+    "strength": { "entropy": 93.3, "category": "Strong", "summaryString": "…" }
+  }
+}
+```
+
+### 5.11 Typed projection
+
+`src/protocol/messages.ts` mirrors this §5 exactly: one
+`<Op>Request` / `<Op>Response` pair per messageType, a shared
+`Credential`, `GeneratedPassword`, `PasswordStrength`, `DatabaseSummary`,
+and `ServerSettings`, and an `RpcTypeMap` keyed on `MessageType` that
+lets callers do `rpc<K>(mt, request)` with a correctly-narrowed return.
+`src/protocol/guards.ts` carries the matching runtime validators.
 
 ## 6. Relationship to the SSH agent
 

@@ -1,0 +1,2 @@
+{"direction":"c2s","messageType":5,"browserNonceB64":"zmSP0eepYR5FkO/HMG993KLUtAgPYw0U","plaintextUtf8":"{\"databaseId\":\"CF248F0B-159A-41B0-B90F-F57FE0D1B5EA\"}"}
+{"direction":"s2c","success":true,"errorMessage":"","serverPublicKey":"ET3PwCLEfA1j5fEy4Vn8ZZEhgkxAaqjd0d9qtp+BFCE=","serverNonceB64":"VDSvmSw0iLdUK7wRnMsCRPuwopTkJszC","plaintextUtf8":"{\"success\":true}"}

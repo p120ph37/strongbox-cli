@@ -1,0 +1,5 @@
+date_utc=2026-04-17T17:41:38Z
+pid=26275
+real=/Applications/Strongbox.app/Contents/MacOS/afproxy
+argc=1
+argv[0]=chrome-extension://mnilpkfepdibngheginihjpknnopchbn/

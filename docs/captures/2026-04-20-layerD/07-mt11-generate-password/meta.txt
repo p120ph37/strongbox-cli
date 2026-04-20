@@ -1,0 +1,7 @@
+date_utc=2026-04-20T21:17:24.635Z
+real=/Applications/Strongbox.app/Contents/MacOS/afproxy
+server_face_pk=dVVD6JbmlAXLe4iiF6H9XM5A7Dh7tjKEXkH+Gl/71CE=
+client_face_pk=6cMMJ1Elqw9cPLmZtOwEPKbkU8TLS1uiUWwFZaiIFn0=
+real_server_pk=ET3PwCLEfA1j5fEy4Vn8ZZEhgkxAaqjd0d9qtp+BFCE=
+argc=1
+argv[0]=chrome-extension://mnilpkfepdibngheginihjpknnopchbn/

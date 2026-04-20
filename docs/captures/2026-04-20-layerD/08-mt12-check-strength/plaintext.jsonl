@@ -1,0 +1,2 @@
+{"direction":"c2s","messageType":12,"browserNonceB64":"jCk+8jQZn0a9YvaHaAE5zAw8lLV0e34G","plaintextUtf8":"{\"password\":\"s\"}"}
+{"direction":"s2c","success":true,"errorMessage":"","serverPublicKey":"ET3PwCLEfA1j5fEy4Vn8ZZEhgkxAaqjd0d9qtp+BFCE=","serverNonceB64":"aXouOiGmdmCCtNSvhvbDcXTc0lBlmfY6","plaintextUtf8":"{\"strength\":{\"category\":\"Very Weak\",\"entropy\":4.700439718141093,\"summaryString\":\"Very Weak (1 \\/ 4.7 bits \\/ 0s)\"}}"}

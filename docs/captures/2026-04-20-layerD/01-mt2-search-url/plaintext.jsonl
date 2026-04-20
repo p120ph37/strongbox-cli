@@ -1,0 +1,2 @@
+{"direction":"c2s","messageType":2,"browserNonceB64":"0x4Rvk+WIt/86U78Gge1ckfGnf1EU6vN","plaintextUtf8":"{\"url\":\"chrome://extensions/\",\"skip\":0,\"take\":9}"}
+{"direction":"s2c","success":true,"errorMessage":"","serverPublicKey":"ET3PwCLEfA1j5fEy4Vn8ZZEhgkxAaqjd0d9qtp+BFCE=","serverNonceB64":"xb4xqEGWiuOsAdiQAbpKqT/ZjKUCrHcF","plaintextUtf8":"{\"results\":[],\"unlockedDatabaseCount\":1}"}

@@ -14,5 +14,8 @@ docs/captures/local/
 .idea/
 *.swp
 
+# Claude Code local settings
+.claude/
+
 # Bun
 bun.lockb

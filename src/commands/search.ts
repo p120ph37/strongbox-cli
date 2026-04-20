@@ -1,17 +1,18 @@
 import { Command } from 'commander';
-import { applyGlobalOpts, emit, withSession, type GlobalOpts } from './_shared.ts';
-import { Op } from '../protocol/messages.ts';
+import { applyGlobalOpts, type GlobalOpts } from './_shared.ts';
+import { UnimplementedError } from '../util/errors.ts';
 
 export function registerSearchCommand(program: Command): void {
   program
     .command('search <query>')
     .description('fuzzy-match entries by title across unlocked databases')
-    .action(async (query: string) => {
+    .action((_query: string) => {
       const parent = program.opts<GlobalOpts>();
       applyGlobalOpts(parent);
-      const result = await withSession((s) =>
-        s.rpc({ id: crypto.randomUUID(), op: Op.search, args: { query } }),
-      );
-      emit(result, Boolean(parent.json));
+      // No observed messageType performs a generic title search. The only
+      // query op is SearchByUrl (messageType=2); a title search would have
+      // to be implemented client-side after listing, once fetching entries
+      // is possible.
+      throw new UnimplementedError('search — no observed title-search messageType');
     });
 }

@@ -1,6 +1,6 @@
 import { Command } from 'commander';
 import { applyGlobalOpts, emit, withSession, type GlobalOpts } from './_shared.ts';
-import { Op } from '../protocol/messages.ts';
+import { MessageType } from '../protocol/messages.ts';
 
 export function registerStatusCommand(program: Command): void {
   program
@@ -9,9 +9,7 @@ export function registerStatusCommand(program: Command): void {
     .action(async () => {
       const parent = program.opts<GlobalOpts>();
       applyGlobalOpts(parent);
-      const result = await withSession((s) =>
-        s.rpc({ id: crypto.randomUUID(), op: Op.status, args: {} }),
-      );
+      const result = await withSession((s) => s.rpc(MessageType.Hello, {}));
       emit(result, Boolean(parent.json));
     });
 }

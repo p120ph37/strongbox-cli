@@ -1,0 +1,2 @@
+{"direction":"c2s","messageType":3,"browserNonceB64":"6m6p7IzIhmpIKF0gtQKgyMKb1gDuLiYO","plaintextUtf8":"{\"databaseId\":\"CF248F0B-159A-41B0-B90F-F57FE0D1B5EA\",\"nodeId\":\"8022CD0C-A784-462D-A4E5-0CE735CA726B\",\"explicitTotp\":false,\"field\":2}"}
+{"direction":"s2c","success":true,"errorMessage":"","serverPublicKey":"ET3PwCLEfA1j5fEy4Vn8ZZEhgkxAaqjd0d9qtp+BFCE=","serverNonceB64":"FeCzNwUe21r6EDT99i2JudPL1BEH+ms9","plaintextUtf8":"{\"success\":true}"}
