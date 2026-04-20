@@ -29,35 +29,63 @@ server public key learned during the Layer-D.1 session. Spawns
 
 ## Probes fired
 
-`[1, 8, 9, 10, 14, 15, 16, 17, 18, 19, 20, 100]` — twelve slots total.
+Two sweeps, both covering `messageType ∈ [1..15] ∪ {100}`:
 
-## Results
+1. `{}` plaintext — triggers decode errors for ops with required fields
+   but is silently accepted by ops that take no arguments.
+2. `[]` plaintext — valid JSON, cannot decode into any request object,
+   so every dispatched slot names its expected request class.
 
-Raw per-probe output in `probes.jsonl`. Summarised:
+mt=0 (Hello) is skipped: its wire format is unencrypted and its class
+name is not needed.
 
-| mt  | success | server response                                                 |
-| --- | ------- | --------------------------------------------------------------- |
-| 1   | false   | `"Can't decode SearchRequest from message JSON"`                |
-| 8   | false   | `"Can't decode GetNewEntryDefaultsRequest from message JSON"`   |
-| 9   | true    | `{"password":"...","alternatives":[5 more strings]}`            |
-| 10  | false   | `"Can't decode GetIconRequest from message JSON"`               |
-| 14  | true    | `{"results":[]}`                                                |
-| 15  | false   | `"Can't decode CopyFieldRequest from message JSON"`             |
-| 16+ | false   | `"Could not convert request to JSON"`                           |
+## Class-name inventory
+
+| mt  | server request class         | notes                                                                 |
+| --- | ---------------------------- | --------------------------------------------------------------------- |
+| 1   | `SearchRequest`              | distinct from mt=2 (URL-keyed); generic search, args TBD              |
+| 2   | `CredentialsForUrlRequest`   | we'd been calling this "SearchByUrl"; rename to match Strongbox       |
+| 3   | `CopyFieldRequest`           | autofill-inject op                                                    |
+| 4   | `LockDatabaseRequest`        | **our code had this slot as "Unlock"; it is Lock**                    |
+| 5   | `UnlockDatabaseRequest`      | **our code had this slot as "Lock"; it is Unlock**                    |
+| 6   | `CreateEntryRequest`         | actual create-entry action                                            |
+| 7   | `CreateEntryRequest`         | reuses the same decode target as mt=6; returns groups — seems to be a "groups available to create into" op |
+| 8   | `GetNewEntryDefaultsRequest` | v1 of the "prepare new entry" op                                      |
+| 9   | *(empty-object accepted)*    | returns `{password, alternatives: string[]}` — multi-suggestion password generator; class name unrecovered |
+| 10  | `GetIconRequest`             | favicon / entry-icon fetch                                            |
+| 11  | *(empty-object accepted)*    | returns a single password; `GeneratePassword`-like; class name unrecovered |
+| 12  | `handleGetPasswordStrengthRequest` | the `handle` prefix is the Objective-C method name; model class is presumably `GetPasswordStrengthRequest` |
+| 13  | `GetNewEntryDefaultsRequestV2` | v2 of mt=8 — probably returns richer defaults                        |
+| 14  | `GetFavouritesRequest`       | `{}` was silently accepted with `{results: []}`; `[]` got the name    |
+| 15  | `CopyFieldRequest`           | same decode class as mt=3; role difference TBD                        |
+| ≥16 | — ("Could not convert request to JSON") | not dispatched                                             |
+
+The ops at mt=9 and mt=11 silently accept `{}` *and* silently accept
+`[]` — i.e. they seem to ignore the request body entirely rather than
+decoding it. Their class names remain unknown; class-sniffing through
+error strings doesn't work for ops that never error on malformed input.
 
 ## Interpretation
 
-- **mt 1, 8, 10, 15**: dispatched, but rejected because `{}` doesn't
-  decode into the expected request class. The class name is in the
-  error string — this is information we didn't have before.
-- **mt 9**: accepts empty input. Returns one primary password plus five
-  alternatives. Distinct from mt=11 which returns a single password.
-  Probably drives the "password generator" UI's multi-suggestion mode.
-- **mt 14**: accepts empty input. Returns `{results: []}`. The shape
-  suggests a search / list op; required arguments unknown.
-- **mt ≥ 16**: the generic "Could not convert request to JSON" error
-  hits *before* dispatch, which is the same error you'd get for an
-  unknown messageType. These slots are presumably unassigned.
+- **mt=4 / mt=5 swap**: our code (before this probe session) had the
+  semantics inverted. The capture session had both ops operating on the
+  same database with identical `{databaseId}` request and
+  `{success: true}` response, so we couldn't tell lock from unlock from
+  wire traffic alone — the class name in the error is the tiebreaker.
+- **mt=7**: the server decodes its request as `CreateEntryRequest` but
+  the *response* is a groups list. Working hypothesis: mt=7 is the
+  "get available groups to create into" companion to the actual Create
+  at mt=6, and Strongbox reuses the request class because both ops
+  only need a `databaseId` field.
+- **mt=9 and mt=11**: both accept any payload silently. Since neither
+  errors, class-sniffing doesn't work on these two. To name them we'd
+  need either a Frida hook (Layer D.2) or to infer from the response
+  shape (mt=11 is almost certainly the standard password generator;
+  mt=9 returns a primary + alternatives so is probably a "suggest
+  multiple" variant).
+- **mt ≥ 16**: the "Could not convert request to JSON" error fires
+  before dispatch, which is the same error you'd get for an unknown
+  messageType. These slots are presumably unassigned.
 
 ## Clean-room note
 

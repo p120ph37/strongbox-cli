@@ -52,10 +52,21 @@ const AFPROXY =
   '/Applications/Strongbox.app/Contents/MacOS/afproxy';
 const CHROME_EXT_ORIGIN = 'chrome-extension://mnilpkfepdibngheginihjpknnopchbn/';
 
-// Gaps in the observed set {0, 2, 3, 4, 5, 6, 7, 11, 12, 13} plus a few
-// higher slots. Easy to expand once the first sweep returns.
-const PROBE_TYPES = [1, 8, 9, 10, 14, 15, 16, 17, 18, 19, 20, 100];
-const PROBE_PLAINTEXT = '{}';
+// Sweep the entire low-messageType range plus a high probe. mt=0 is
+// Hello and has a different wire format (no crypto_box), so it's
+// skipped — its class name isn't needed.
+const PROBE_TYPES = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 100];
+
+// Each plaintext is tried against each messageType. `[]` is valid JSON
+// but can't decode into any request object, which forces Strongbox to
+// emit the "Can't decode <ClassName> from message JSON" error for every
+// dispatched slot — including ones that would otherwise accept `{}` and
+// never name themselves (mt=9, mt=14).
+const PROBE_PLAINTEXTS: Array<{ label: string; plaintext: string }> = [
+  { label: 'empty-object', plaintext: '{}' },
+  { label: 'empty-array', plaintext: '[]' },
+];
+
 const PROBE_TIMEOUT_MS = 5_000;
 
 /* ─── Types ───────────────────────────────────────────────────────────── */
@@ -75,6 +86,8 @@ interface ResponseEnvelope {
 
 interface ProbeResult {
   messageType: number;
+  probeLabel: string;
+  probePlaintext: string;
   rawResponse: ResponseEnvelope | null;
   plaintextUtf8: string | null;
   plaintextDecryptError: string | null;
@@ -115,11 +128,15 @@ function isResponseEnvelope(x: unknown): x is ResponseEnvelope {
 
 async function probe(
   messageType: number,
+  probeLabel: string,
+  probePlaintext: string,
   client: KeyPair,
   serverPk: Uint8Array,
 ): Promise<ProbeResult> {
   const result: ProbeResult = {
     messageType,
+    probeLabel,
+    probePlaintext,
     rawResponse: null,
     plaintextUtf8: null,
     plaintextDecryptError: null,
@@ -143,7 +160,7 @@ async function probe(
   try {
     const nonce = await randomNonce();
     const ciphertext = await boxSeal({
-      plaintext: new TextEncoder().encode(PROBE_PLAINTEXT),
+      plaintext: new TextEncoder().encode(probePlaintext),
       nonce,
       recipientPublicKey: serverPk,
       senderSecretKey: client.secretKey,
@@ -236,14 +253,17 @@ async function main(): Promise<void> {
   const outPath = join(outDir, 'probes.jsonl');
   const lines: string[] = [];
 
-  for (const mt of PROBE_TYPES) {
-    process.stderr.write(`probing messageType=${mt}... `);
-    const r = await probe(mt, client, serverPk);
-    lines.push(JSON.stringify(r));
-    const summary = r.transportError
-      ? `TRANSPORT_ERR: ${r.transportError}`
-      : `success=${String(r.rawResponse?.success ?? '?')} errorMessage=${JSON.stringify(r.rawResponse?.errorMessage ?? '?')}`;
-    process.stderr.write(`${summary}\n`);
+  for (const { label, plaintext } of PROBE_PLAINTEXTS) {
+    process.stderr.write(`\n── payload: ${label} (${JSON.stringify(plaintext)}) ──\n`);
+    for (const mt of PROBE_TYPES) {
+      process.stderr.write(`  mt=${String(mt).padStart(3)} `);
+      const r = await probe(mt, label, plaintext, client, serverPk);
+      lines.push(JSON.stringify(r));
+      const summary = r.transportError
+        ? `TRANSPORT_ERR: ${r.transportError}`
+        : `success=${String(r.rawResponse?.success ?? '?')} err=${JSON.stringify(r.rawResponse?.errorMessage ?? '?')}`;
+      process.stderr.write(`${summary}\n`);
+    }
   }
 
   await writeFile(outPath, lines.join('\n') + '\n');
