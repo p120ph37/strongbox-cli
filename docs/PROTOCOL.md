@@ -191,13 +191,17 @@ clientSecretKey)` on the client side (inverse on the server side).
   several native-host spawns (likely scoped to popup/service-worker
   lifetime) but not forever.
 
-**Handshake, revised:** design hypothesis (2) from the earlier draft of
-this section (TOFU with persisted client identity, user accepts in the app
-UI on first connection) remains the best fit for the observed UX, but
-there is **no separate handshake message**. The first connection from a
-given clientPublicKey is presumably what triggers the one-time "allow this
-extension?" dialog; subsequent connections go through transparently. To
-be confirmed when we implement from scratch.
+**Handshake, revised (2026-04-20):** there is **no separate handshake
+message** — the Hello envelope (`messageType=0`, see §4.2) doubles as
+key exchange. The earlier hypothesis that Strongbox pops a one-time
+"allow this extension?" dialog on first sight of a new client public
+key **was not observed**: during the Layer-D.1 MitM session on
+2026-04-20, Strongbox 1.63.1 silently accepted a fresh client-face
+keypair that it had never seen before. No UI prompt appeared at any
+point during unlock / autofill / create-entry / lock flows. Persisting
+the client keypair client-side is therefore good hygiene (and future-
+proofs against a newer Strongbox adding the prompt) but offers no
+observable benefit against the current server version.
 
 ### 4.2 `messageType = 0` — Hello
 
@@ -246,7 +250,25 @@ redacted sample.
 | 13 | Prepare create-entry form  | `2026-04-20-layerD/09-mt13-prepare-new-entry/` |
 
 Integer values 1, 8, 9, 10, and anything ≥ 14 were **not** observed on
-the wire; whether they exist and map to ops we haven't triggered is open.
+the wire during normal extension use. A synthetic probe on 2026-04-20
+(see `tools/probe-messagetypes.ts` and
+`docs/captures/2026-04-20-probes/probes.jsonl`) mapped the remaining
+slots the dispatcher recognises:
+
+| mt  | internal class name         | behaviour on `{}` probe                           |
+| --- | --------------------------- | ------------------------------------------------- |
+| 1   | `SearchRequest`             | `errorMessage="Can't decode SearchRequest from message JSON"` — distinct from mt=2 (SearchByUrl); likely a generic search op |
+| 8   | `GetNewEntryDefaultsRequest`| errors out pre-dispatch; pairs with mt=13 `PrepareNewEntry` |
+| 9   | *(unnamed)*                 | accepts empty request; returns `{password, alternatives: string[]}` — a second password-generator, distinct from mt=11, that yields multiple candidates |
+| 10  | `GetIconRequest`            | favicon / entry-icon fetch |
+| 14  | *(unnamed)*                 | accepts empty request; returns `{results: []}` — generic list/query op, arguments TBD |
+| 15  | `CopyFieldRequest`          | same request class name as mt=3; role difference TBD |
+| 16+ | —                           | `errorMessage="Could not convert request to JSON"` — not dispatched (unknown messageType) |
+
+The synthetic probes never supplied a conforming inner payload, so the
+full request/response schemas for mt 1, 8, 10, 15 are still TBD. Class
+names come from Strongbox's own error strings; we did not read the
+Strongbox source.
 
 ### 5.1 `mt = 0` — Hello
 
