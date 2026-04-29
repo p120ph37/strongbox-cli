@@ -16,7 +16,8 @@ export function registerGetCommand(program: Command): void {
       applyGlobalOpts(parent);
       // No observed messageType fetches a single entry by opaque ref. The
       // wire protocol works in (databaseId, nodeId) pairs; a two-step
-      // resolve-then-fetch will land with the URL-search result schema.
-      throw new UnimplementedError('get <ref> — awaiting non-empty SearchByUrl capture');
+      // resolve-then-fetch will land once a non-empty CredentialsForUrl
+      // (mt=2) capture lets us pin down the result element schema.
+      throw new UnimplementedError('get <ref> — awaiting non-empty CredentialsForUrl capture');
     });
 }

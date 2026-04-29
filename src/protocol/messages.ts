@@ -60,21 +60,31 @@ export interface ResponseEnvelope {
 /* ─── Operation codes ──────────────────────────────────────────────────── */
 
 /**
- * Every `messageType` value observed on the wire. Operation names are
- * editorial — they reflect what each message visibly does, not any label
- * in Strongbox's source.
+ * Every `messageType` value the extension is observed to emit. Names here
+ * match the Strongbox-internal request-class names recovered on
+ * 2026-04-20 from the dispatcher's "Can't decode <ClassName> from message
+ * JSON" error strings (see `docs/captures/2026-04-20-probes/`), with two
+ * exceptions:
+ *
+ *   - `Hello` (mt=0) has no class name; the wire request is the literal
+ *     string "message".
+ *   - `ListGroups` (mt=7) is editorial — Strongbox decodes its request as
+ *     `CreateEntryRequest` (it shares the just-`databaseId` field set
+ *     with mt=6 Create) but the *operation* returns a groups list, so
+ *     the editorial name reflects what the call does, not what its
+ *     decode target is called.
  */
 export const MessageType = {
   Hello: 0,
-  SearchByUrl: 2,
+  CredentialsForUrl: 2,
   CopyField: 3,
-  UnlockDatabase: 4,
-  LockDatabase: 5,
+  LockDatabase: 4,
+  UnlockDatabase: 5,
   CreateEntry: 6,
   ListGroups: 7,
   GeneratePassword: 11,
-  CheckPasswordStrength: 12,
-  PrepareNewEntry: 13,
+  GetPasswordStrength: 12,
+  GetNewEntryDefaultsV2: 13,
 } as const;
 
 export type MessageTypeValue = (typeof MessageType)[keyof typeof MessageType];
@@ -159,7 +169,7 @@ export interface HelloRequest {
 }
 
 /** `messageType=2`. Extension asks for entries matching a page URL. */
-export interface SearchByUrlRequest {
+export interface CredentialsForUrlRequest {
   readonly url: string;
   /** Pagination offset. Observed: 0. */
   readonly skip: number;
@@ -179,13 +189,13 @@ export interface CopyFieldRequest {
   readonly field: number;
 }
 
-/** `messageType=4`. */
-export interface UnlockDatabaseRequest {
+/** `messageType=4`. Lock the specified database. */
+export interface LockDatabaseRequest {
   readonly databaseId: string;
 }
 
-/** `messageType=5`. */
-export interface LockDatabaseRequest {
+/** `messageType=5`. Unlock the specified database (UI-driven; passphrase entry happens in Strongbox.app, not on the wire). */
+export interface UnlockDatabaseRequest {
   readonly databaseId: string;
 }
 
@@ -215,16 +225,17 @@ export interface GeneratePasswordRequest {
 }
 
 /** `messageType=12`. Live strength meter for a typed password. */
-export interface CheckPasswordStrengthRequest {
+export interface GetPasswordStrengthRequest {
   readonly password: string;
 }
 
 /**
  * `messageType=13`. Preload state for the "create new entry" form: a
  * suggested password and the most-popular usernames already in the
- * target database.
+ * target database. Strongbox names this `GetNewEntryDefaultsRequestV2`;
+ * mt=8 is the (unobserved) v1 of the same call.
  */
-export interface PrepareNewEntryRequest {
+export interface GetNewEntryDefaultsV2Request {
   readonly databaseId: string;
 }
 
@@ -242,7 +253,7 @@ export interface HelloResponse {
  * capture returned `[]`. Likely `readonly Credential[]` once a non-empty
  * search is captured; keep as `unknown` until confirmed.
  */
-export interface SearchByUrlResponse {
+export interface CredentialsForUrlResponse {
   readonly results: readonly unknown[];
   readonly unlockedDatabaseCount: number;
 }
@@ -271,12 +282,12 @@ export interface GeneratePasswordResponse {
 }
 
 /** `messageType=12`. */
-export interface CheckPasswordStrengthResponse {
+export interface GetPasswordStrengthResponse {
   readonly strength: PasswordStrength;
 }
 
 /** `messageType=13`. */
-export interface PrepareNewEntryResponse {
+export interface GetNewEntryDefaultsV2Response {
   readonly mostPopularUsernames: readonly string[];
   readonly username: string;
   readonly password: GeneratedPassword;
@@ -291,23 +302,26 @@ export interface PrepareNewEntryResponse {
  */
 export interface RpcTypeMap {
   readonly [MessageType.Hello]: { request: HelloRequest; response: HelloResponse };
-  readonly [MessageType.SearchByUrl]: { request: SearchByUrlRequest; response: SearchByUrlResponse };
+  readonly [MessageType.CredentialsForUrl]: {
+    request: CredentialsForUrlRequest;
+    response: CredentialsForUrlResponse;
+  };
   readonly [MessageType.CopyField]: { request: CopyFieldRequest; response: AckResponse };
-  readonly [MessageType.UnlockDatabase]: { request: UnlockDatabaseRequest; response: AckResponse };
   readonly [MessageType.LockDatabase]: { request: LockDatabaseRequest; response: AckResponse };
+  readonly [MessageType.UnlockDatabase]: { request: UnlockDatabaseRequest; response: AckResponse };
   readonly [MessageType.CreateEntry]: { request: CreateEntryRequest; response: CreateEntryResponse };
   readonly [MessageType.ListGroups]: { request: ListGroupsRequest; response: ListGroupsResponse };
   readonly [MessageType.GeneratePassword]: {
     request: GeneratePasswordRequest;
     response: GeneratePasswordResponse;
   };
-  readonly [MessageType.CheckPasswordStrength]: {
-    request: CheckPasswordStrengthRequest;
-    response: CheckPasswordStrengthResponse;
+  readonly [MessageType.GetPasswordStrength]: {
+    request: GetPasswordStrengthRequest;
+    response: GetPasswordStrengthResponse;
   };
-  readonly [MessageType.PrepareNewEntry]: {
-    request: PrepareNewEntryRequest;
-    response: PrepareNewEntryResponse;
+  readonly [MessageType.GetNewEntryDefaultsV2]: {
+    request: GetNewEntryDefaultsV2Request;
+    response: GetNewEntryDefaultsV2Response;
   };
 }
 

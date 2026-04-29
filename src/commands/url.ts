@@ -10,7 +10,7 @@ export function registerUrlCommand(program: Command): void {
       const parent = program.opts<GlobalOpts>();
       applyGlobalOpts(parent);
       const result = await withSession((s) =>
-        s.rpc(MessageType.SearchByUrl, { url, skip: 0, take: 9 }),
+        s.rpc(MessageType.CredentialsForUrl, { url, skip: 0, take: 9 }),
       );
       emit(result, Boolean(parent.json));
     });

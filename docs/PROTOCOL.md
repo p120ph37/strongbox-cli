@@ -236,39 +236,58 @@ Plaintext for every `messageType` the extension emits was decoded on
 operation; subsections give the full request/response schema and a
 redacted sample.
 
-| mt | operation                  | capture dir                                    |
-| -- | -------------------------- | ---------------------------------------------- |
-| 0  | Hello                      | `2026-04-20-layerD/00-mt0-hello/`              |
-| 2  | Search credentials by URL  | `2026-04-20-layerD/01-mt2-search-url/`         |
-| 3  | Copy field (autofill)      | `2026-04-20-layerD/02-mt3-copy-field/`         |
-| 4  | Unlock database            | `2026-04-20-layerD/03-mt4-unlock-db/`          |
-| 5  | Lock database              | `2026-04-20-layerD/04-mt5-lock-db/`            |
-| 6  | Create entry               | `2026-04-20-layerD/05-mt6-create-entry/`       |
-| 7  | List groups in database    | `2026-04-20-layerD/06-mt7-list-groups/`        |
-| 11 | Generate password          | `2026-04-20-layerD/07-mt11-generate-password/` |
-| 12 | Check password strength    | `2026-04-20-layerD/08-mt12-check-strength/`    |
-| 13 | Prepare create-entry form  | `2026-04-20-layerD/09-mt13-prepare-new-entry/` |
+Names in this section match the Strongbox-internal request-class names
+recovered on 2026-04-20 from the dispatcher's "Can't decode <ClassName>
+from message JSON" error strings (see §5.0 below); the only editorial
+deviations are `Hello` (mt=0, has no class name on the wire) and
+`ListGroups` (mt=7, where the operation returns groups but Strongbox
+decodes the request as `CreateEntryRequest`).
 
-Integer values 1, 8, 9, 10, and anything ≥ 14 were **not** observed on
-the wire during normal extension use. A synthetic probe on 2026-04-20
-(see `tools/probe-messagetypes.ts` and
-`docs/captures/2026-04-20-probes/probes.jsonl`) mapped the remaining
-slots the dispatcher recognises:
+| mt | operation                | server-side class           | capture dir                                    |
+| -- | ------------------------ | --------------------------- | ---------------------------------------------- |
+| 0  | Hello                    | *(special — see §4.2)*      | `2026-04-20-layerD/00-mt0-hello/`              |
+| 2  | CredentialsForUrl        | `CredentialsForUrlRequest`  | `2026-04-20-layerD/01-mt2-search-url/`         |
+| 3  | CopyField                | `CopyFieldRequest`          | `2026-04-20-layerD/02-mt3-copy-field/`         |
+| 4  | LockDatabase             | `LockDatabaseRequest`       | `2026-04-20-layerD/03-mt4-lock-db/`            |
+| 5  | UnlockDatabase           | `UnlockDatabaseRequest`     | `2026-04-20-layerD/04-mt5-unlock-db/`          |
+| 6  | CreateEntry              | `CreateEntryRequest`        | `2026-04-20-layerD/05-mt6-create-entry/`       |
+| 7  | ListGroups *(editorial)* | `CreateEntryRequest` (reused) | `2026-04-20-layerD/06-mt7-list-groups/`      |
+| 11 | GeneratePassword         | *(unnamed — accepts any input silently)* | `2026-04-20-layerD/07-mt11-generate-password/` |
+| 12 | GetPasswordStrength      | `handleGetPasswordStrengthRequest` | `2026-04-20-layerD/08-mt12-check-strength/` |
+| 13 | GetNewEntryDefaultsV2    | `GetNewEntryDefaultsRequestV2` | `2026-04-20-layerD/09-mt13-prepare-new-entry/` |
 
-| mt  | internal class name         | behaviour on `{}` probe                           |
-| --- | --------------------------- | ------------------------------------------------- |
-| 1   | `SearchRequest`             | `errorMessage="Can't decode SearchRequest from message JSON"` — distinct from mt=2 (SearchByUrl); likely a generic search op |
-| 8   | `GetNewEntryDefaultsRequest`| errors out pre-dispatch; pairs with mt=13 `PrepareNewEntry` |
-| 9   | *(unnamed)*                 | accepts empty request; returns `{password, alternatives: string[]}` — a second password-generator, distinct from mt=11, that yields multiple candidates |
-| 10  | `GetIconRequest`            | favicon / entry-icon fetch |
-| 14  | *(unnamed)*                 | accepts empty request; returns `{results: []}` — generic list/query op, arguments TBD |
-| 15  | `CopyFieldRequest`          | same request class name as mt=3; role difference TBD |
-| 16+ | —                           | `errorMessage="Could not convert request to JSON"` — not dispatched (unknown messageType) |
+### 5.0 Probe sweep — slots not seen during normal extension use
 
-The synthetic probes never supplied a conforming inner payload, so the
-full request/response schemas for mt 1, 8, 10, 15 are still TBD. Class
-names come from Strongbox's own error strings; we did not read the
-Strongbox source.
+A synthetic probe sweep on 2026-04-20 (see `tools/probe-messagetypes.ts`
+and `docs/captures/2026-04-20-probes/probes.jsonl`) sent two payloads —
+`{}` and `[]` — to every messageType in `[1..15] ∪ {100}`. The `[]`
+payload is valid JSON but cannot decode into any request object, so
+every dispatched slot names its expected class via the resulting error.
+The sweep recovered the names listed in the table above and additionally
+mapped the slots not driven by the extension UI:
+
+| mt  | server-side class                | notes                                                 |
+| --- | -------------------------------- | ----------------------------------------------------- |
+| 1   | `SearchRequest`                  | distinct from mt=2 (URL-keyed); generic search; args TBD |
+| 8   | `GetNewEntryDefaultsRequest`     | v1 of mt=13 `GetNewEntryDefaultsRequestV2`            |
+| 9   | *(unnamed — accepts any input)*  | returns `{password, alternatives: string[]}` — a multi-suggestion variant of `GeneratePassword` |
+| 10  | `GetIconRequest`                 | favicon / entry-icon fetch                            |
+| 14  | `GetFavouritesRequest`           | response shape `{results: []}` on empty input          |
+| 15  | `CopyFieldRequest`               | same decode class as mt=3; role difference TBD        |
+| ≥16 | —                                | `errorMessage="Could not convert request to JSON"` — slot not dispatched |
+
+The probes never supplied a conforming inner payload, so request/response
+schemas for mt = 1, 8, 10, 14, 15 are still TBD. mt = 9 and mt = 11
+silently accept any payload and so cannot be named via this method.
+All class names come from Strongbox's runtime error strings; the
+Strongbox source tree was not read.
+
+> Caveat: the **mt=4 / mt=5 ordering** (Lock = 4, Unlock = 5) was
+> originally inverted in this document and in the type system. The
+> capture session at `03-mt4-lock-db/` and `04-mt5-unlock-db/` shows
+> identical `{databaseId}` request and `{success: true}` response
+> for both ops, so wire traffic alone cannot distinguish them. The
+> server's class names are the tiebreaker.
 
 ### 5.1 `mt = 0` — Hello
 
@@ -294,7 +313,7 @@ Response:
 }
 ```
 
-### 5.2 `mt = 2` — Search credentials by URL
+### 5.2 `mt = 2` — CredentialsForUrl
 
 Request: `{ "url": "...", "skip": 0, "take": 9 }` (observed pagination
 values; larger `take` untested).
@@ -305,7 +324,7 @@ capture we have returned `results: []`; the element type is therefore
 until a non-empty search is captured. Best guess is `Credential[]` (see
 §5.6).
 
-### 5.3 `mt = 3` — Copy field
+### 5.3 `mt = 3` — CopyField
 
 The extension asks the server to inject a specific field of a specific
 entry via the OS paste/keyboard path. The response only confirms success;
@@ -324,15 +343,19 @@ Request:
 
 Response: `{ "success": true }`.
 
-### 5.4 `mt = 4` — Unlock database &nbsp;·&nbsp; `mt = 5` — Lock database
+### 5.4 `mt = 4` — LockDatabase &nbsp;·&nbsp; `mt = 5` — UnlockDatabase
 
 Request for both: `{ "databaseId": "…" }`.
 Response for both: `{ "success": true }`.
 
-Unlocking a locked database triggers the Strongbox UI to prompt for the
-master password; the native host doesn't return until that flow resolves.
+The two ops are wire-indistinguishable — both shapes are identical, and
+the captures at `03-mt4-lock-db/` and `04-mt5-unlock-db/` were
+disambiguated only via the dispatcher's class names recovered by the
+probe sweep (§5.0). Unlocking a locked database triggers the Strongbox
+UI to prompt for the master password; the native host doesn't return
+until that flow resolves.
 
-### 5.5 `mt = 6` — Create entry
+### 5.5 `mt = 6` — CreateEntry
 
 Request:
 
@@ -373,12 +396,21 @@ Response: `{ "uuid": "…", "credential": <Credential> }` where
 }
 ```
 
-### 5.7 `mt = 7` — List groups
+### 5.7 `mt = 7` — ListGroups *(editorial name)*
 
 Request: `{ "databaseId": "…" }`.
 Response: `{ "groups": [ { "uuid": "…", "title": "…" }, … ] }`.
 
-### 5.8 `mt = 11` — Generate password
+Strongbox decodes this request through the **same** `CreateEntryRequest`
+class as mt=6 — the probe sweep returned `"Can't decode CreateEntryRequest from message JSON"`
+for mt=7 too. The class is reused because both ops only need a
+`databaseId` field, but the operation a mt=7 dispatch performs is to
+*list available groups*, which is why this document uses the editorial
+name `ListGroups` rather than `CreateEntry`. The reuse means a mt=7
+request with the *full* mt=6 field set would also decode and dispatch;
+behaviour in that case is unobserved.
+
+### 5.8 `mt = 11` — GeneratePassword
 
 Request: `{}`. Response:
 
@@ -392,7 +424,7 @@ Request: `{}`. Response:
 }
 ```
 
-### 5.9 `mt = 12` — Check password strength
+### 5.9 `mt = 12` — GetPasswordStrength
 
 Request: `{ "password": "…" }` (the extension sends one request per
 keystroke in the password field, so expect N invocations for an
@@ -400,10 +432,12 @@ N-character typed password).
 
 Response: `{ "strength": { "entropy": 10.2, "category": "Very Weak", "summaryString": "Very Weak (3 / 10.2 bits / 0s)" } }`.
 
-### 5.10 `mt = 13` — Prepare create-entry form
+### 5.10 `mt = 13` — GetNewEntryDefaultsV2
 
 Loaded once when the create-entry UI opens, to preseed username and
-password fields.
+password fields. Strongbox calls this `GetNewEntryDefaultsRequestV2`;
+mt=8 (`GetNewEntryDefaultsRequest`, no V2 suffix) is presumably the
+older variant — its request and response shapes are unobserved.
 
 Request: `{ "databaseId": "…" }`. Response:
 

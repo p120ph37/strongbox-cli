@@ -11,16 +11,20 @@
 import {
   MessageType,
   type AckResponse,
-  type CheckPasswordStrengthRequest,
-  type CheckPasswordStrengthResponse,
   type CopyFieldRequest,
   type CreateEntryRequest,
   type CreateEntryResponse,
   type Credential,
+  type CredentialsForUrlRequest,
+  type CredentialsForUrlResponse,
   type DatabaseSummary,
   type GeneratePasswordRequest,
   type GeneratePasswordResponse,
   type GeneratedPassword,
+  type GetNewEntryDefaultsV2Request,
+  type GetNewEntryDefaultsV2Response,
+  type GetPasswordStrengthRequest,
+  type GetPasswordStrengthResponse,
   type HelloRequest,
   type HelloResponse,
   type ListGroupsRequest,
@@ -28,14 +32,10 @@ import {
   type LockDatabaseRequest,
   type MessageTypeValue,
   type PasswordStrength,
-  type PrepareNewEntryRequest,
-  type PrepareNewEntryResponse,
   type RequestEnvelope,
   type ResponseEnvelope,
   type RpcRequestFor,
   type RpcResponseFor,
-  type SearchByUrlRequest,
-  type SearchByUrlResponse,
   type ServerSettings,
   type UnlockDatabaseRequest,
 } from './messages.ts';
@@ -167,7 +167,7 @@ function isHelloRequest(_x: unknown): _x is HelloRequest {
   return true;
 }
 
-function isSearchByUrlRequest(x: unknown): x is SearchByUrlRequest {
+function isCredentialsForUrlRequest(x: unknown): x is CredentialsForUrlRequest {
   return isObject(x) && isString(x['url']) && isNumber(x['skip']) && isNumber(x['take']);
 }
 
@@ -183,7 +183,11 @@ function isCopyFieldRequest(x: unknown): x is CopyFieldRequest {
 
 function isDatabaseIdOnlyRequest(
   x: unknown,
-): x is UnlockDatabaseRequest | LockDatabaseRequest | ListGroupsRequest | PrepareNewEntryRequest {
+): x is
+  | LockDatabaseRequest
+  | UnlockDatabaseRequest
+  | ListGroupsRequest
+  | GetNewEntryDefaultsV2Request {
   return isObject(x) && isString(x['databaseId']);
 }
 
@@ -205,7 +209,7 @@ function isGeneratePasswordRequest(x: unknown): x is GeneratePasswordRequest {
   return isObject(x);
 }
 
-function isCheckPasswordStrengthRequest(x: unknown): x is CheckPasswordStrengthRequest {
+function isGetPasswordStrengthRequest(x: unknown): x is GetPasswordStrengthRequest {
   return isObject(x) && isString(x['password']);
 }
 
@@ -221,7 +225,7 @@ function isHelloResponse(x: unknown): x is HelloResponse {
   );
 }
 
-function isSearchByUrlResponse(x: unknown): x is SearchByUrlResponse {
+function isCredentialsForUrlResponse(x: unknown): x is CredentialsForUrlResponse {
   return isObject(x) && Array.isArray(x['results']) && isNumber(x['unlockedDatabaseCount']);
 }
 
@@ -250,11 +254,11 @@ function isGeneratePasswordResponse(x: unknown): x is GeneratePasswordResponse {
   );
 }
 
-function isCheckPasswordStrengthResponse(x: unknown): x is CheckPasswordStrengthResponse {
+function isGetPasswordStrengthResponse(x: unknown): x is GetPasswordStrengthResponse {
   return isObject(x) && isPasswordStrength(x['strength']);
 }
 
-function isPrepareNewEntryResponse(x: unknown): x is PrepareNewEntryResponse {
+function isGetNewEntryDefaultsV2Response(x: unknown): x is GetNewEntryDefaultsV2Response {
   return (
     isObject(x) &&
     isStringArray(x['mostPopularUsernames']) &&
@@ -276,21 +280,21 @@ export function isRpcRequestFor<K extends MessageTypeValue>(
   switch (messageType) {
     case MessageType.Hello:
       return isHelloRequest(payload);
-    case MessageType.SearchByUrl:
-      return isSearchByUrlRequest(payload);
+    case MessageType.CredentialsForUrl:
+      return isCredentialsForUrlRequest(payload);
     case MessageType.CopyField:
       return isCopyFieldRequest(payload);
-    case MessageType.UnlockDatabase:
     case MessageType.LockDatabase:
+    case MessageType.UnlockDatabase:
     case MessageType.ListGroups:
-    case MessageType.PrepareNewEntry:
+    case MessageType.GetNewEntryDefaultsV2:
       return isDatabaseIdOnlyRequest(payload);
     case MessageType.CreateEntry:
       return isCreateEntryRequest(payload);
     case MessageType.GeneratePassword:
       return isGeneratePasswordRequest(payload);
-    case MessageType.CheckPasswordStrength:
-      return isCheckPasswordStrengthRequest(payload);
+    case MessageType.GetPasswordStrength:
+      return isGetPasswordStrengthRequest(payload);
     default:
       return false;
   }
@@ -307,11 +311,11 @@ export function isRpcResponseFor<K extends MessageTypeValue>(
   switch (messageType) {
     case MessageType.Hello:
       return isHelloResponse(payload);
-    case MessageType.SearchByUrl:
-      return isSearchByUrlResponse(payload);
+    case MessageType.CredentialsForUrl:
+      return isCredentialsForUrlResponse(payload);
     case MessageType.CopyField:
-    case MessageType.UnlockDatabase:
     case MessageType.LockDatabase:
+    case MessageType.UnlockDatabase:
       return isAckResponse(payload);
     case MessageType.CreateEntry:
       return isCreateEntryResponse(payload);
@@ -319,10 +323,10 @@ export function isRpcResponseFor<K extends MessageTypeValue>(
       return isListGroupsResponse(payload);
     case MessageType.GeneratePassword:
       return isGeneratePasswordResponse(payload);
-    case MessageType.CheckPasswordStrength:
-      return isCheckPasswordStrengthResponse(payload);
-    case MessageType.PrepareNewEntry:
-      return isPrepareNewEntryResponse(payload);
+    case MessageType.GetPasswordStrength:
+      return isGetPasswordStrengthResponse(payload);
+    case MessageType.GetNewEntryDefaultsV2:
+      return isGetNewEntryDefaultsV2Response(payload);
     default:
       return false;
   }

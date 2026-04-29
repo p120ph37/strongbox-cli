@@ -9,10 +9,10 @@ export function registerSearchCommand(program: Command): void {
     .action((_query: string) => {
       const parent = program.opts<GlobalOpts>();
       applyGlobalOpts(parent);
-      // No observed messageType performs a generic title search. The only
-      // query op is SearchByUrl (messageType=2); a title search would have
-      // to be implemented client-side after listing, once fetching entries
-      // is possible.
-      throw new UnimplementedError('search — no observed title-search messageType');
+      // mt=1 is dispatched as `SearchRequest` (per the 2026-04-20 probe
+      // sweep) but its full request schema is unobserved — the probes only
+      // recovered the class name, not the field set. Until a real title
+      // search is captured, treat this as unimplemented.
+      throw new UnimplementedError('search — mt=1 SearchRequest schema unobserved');
     });
 }
