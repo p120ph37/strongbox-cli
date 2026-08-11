@@ -31,8 +31,7 @@
     "CHANGELOG.md"
   ],
   "publishConfig": {
-    "access": "public",
-    "provenance": true
+    "access": "public"
   },
   "scripts": {
     "build": "bun build ./src/cli.ts --target=bun --outfile=./bin/strongbox-cli",
