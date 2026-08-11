@@ -76,3 +76,5 @@ Never print secrets unless the user explicitly asked for a secret field. One val
 - Already-tagged version at the top → skip silently (safe to re-merge). Publish happens **before** tagging, so a failed publish leaves no tag and retries on the next push.
 
 `package.json`'s committed `version` is a placeholder (`0.0.0`); the changelog governs. npm publish uses **Trusted Publishing / OIDC** (`id-token: write`, no `NPM_TOKEN`); the release job checks out and tags with `secrets.RELEASE_PAT`.
+
+Requires two one-time setups (done, noted for anyone replicating this config): a `RELEASE_PAT` repo secret to push the tag, and an npm Trusted Publisher for `release.yml` on this repo.

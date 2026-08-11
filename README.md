@@ -25,9 +25,9 @@ Strongbox's browser extension talks to the macOS app through a three-hop chain:
 browser extension  ──(Native Messaging / stdio)──▶  afproxy  ──(Unix socket)──▶  Strongbox.app
 ```
 
-All payloads between the extension and the app are encrypted with a libsodium "Crypto Box" (Curve25519 + XSalsa20-Poly1305) using an ephemeral keypair. See [`docs/PROTOCOL.md`](docs/PROTOCOL.md) for the full model and what's known vs. what we need to determine empirically.
+All payloads between the extension and the app are encrypted with a libsodium "Crypto Box" (Curve25519 + XSalsa20-Poly1305) using an ephemeral keypair. See [`docs/PROTOCOL.md`](docs/PROTOCOL.md) for the full model.
 
-This CLI impersonates the browser extension: it spawns `afproxy` with the browser extension's identity, completes the handshake, and issues the same RPCs the extension does.
+This CLI impersonates the browser extension: it spawns `afproxy` with the browser extension's identity, exchanges keys, and issues the same RPCs the extension does.
 
 ## Legal / licensing
 
@@ -71,32 +71,3 @@ strongbox-cli diagnose                        # health-check the integration
 ## Contributing
 
 See [`CONTRIBUTING.md`](CONTRIBUTING.md) for the clean-room rules, and [`docs/PROTOCOL.md`](docs/PROTOCOL.md) for the protocol.
-
-## Releases
-
-Releases are cut from `CHANGELOG.md` by `.github/workflows/release.yml` (see the changelog's own "Releasing" section for the author workflow). When the topmost heading is `## [vX.Y.Z] - YYYY-MM-DD` (dated, date not in the future) and no such tag exists yet, the workflow:
-
-1. Runs the full `test.yml` matrix (typecheck + tests on macOS + Linux).
-2. Publishes to npm using **trusted publishing via OIDC** — no long-lived `NPM_TOKEN`. Provenance is generated automatically and verifiable with `npm audit signatures`.
-3. Then creates the git tag and a GitHub Release whose notes are the changelog entry body. (Publish runs before tagging, so a failed publish leaves no tag and retries on the next push.)
-
-A dateless `## [vX.Y.Z]` heading is a draft — mergeable to `main` without releasing.
-
-### One-time setup on npmjs.com
-
-Before the first release can run successfully, configure a Trusted Publisher for the package at https://www.npmjs.com/package/strongbox-cli/access:
-
-- Provider: **GitHub Actions**
-- Organization or user: **p120ph37**
-- Repository: **strongbox-cli**
-- Workflow filename: **release.yml**
-- Environment name: *(leave blank)*
-
-Note: the Trusted Publisher rule can't be configured for a package that doesn't exist yet on npm. For the very first publish you have two options:
-
-1. **Park a placeholder first.** Publish a minimal `0.0.0` version manually with a local `npm publish`, then configure the Trusted Publisher, then let CI take over from `0.0.1` onward.
-2. **Use one-time token auth for the first release only.** Temporarily add an `NPM_TOKEN` secret and a `NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}` env line to the publish step, run it once, then delete both and configure the Trusted Publisher before the next release.
-
-### Required repository secrets
-
-- `RELEASE_PAT` — a Personal Access Token with `contents: write` and `workflow: write` scopes on this repo, used to push the git tag from the release job. (The default `GITHUB_TOKEN` can't push to a protected branch with tag-protection rules.) No `NPM_TOKEN` is needed once Trusted Publishing is configured.
