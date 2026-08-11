@@ -21,7 +21,7 @@
     "macos"
   ],
   "bin": {
-    "strongbox-cli": "./bin/strongbox-cli"
+    "strongbox-cli": "bin/strongbox-cli"
   },
   "files": [
     "bin/",
