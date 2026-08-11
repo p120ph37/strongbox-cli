@@ -70,4 +70,10 @@ Never print secrets unless the user explicitly asked for a secret field. One val
 
 ## Release automation
 
-`CHANGELOG.md` is the release trigger. `.github/workflows/release.yml` scans for the first heading of the form `## [vX.Y.Z] - YYYY-MM-DD`; if the date is today (UTC ±12h), the tag doesn't exist, and no matching release exists, it tags, creates a GitHub Release with the changelog body as notes, and publishes to npm via **Trusted Publishing / OIDC** (no `NPM_TOKEN`). Drafts in progress use a date-less `## [vNext]` heading so they don't trigger a release.
+`CHANGELOG.md` is the release trigger (mechanism shared with `claude-aws-mfa`). `.github/workflows/release.yml` reads the **topmost** `## [vX.Y.Z]` heading — dated or not:
+
+- No date → **draft**; mergeable to `main` without releasing.
+- `## [vX.Y.Z] - YYYY-MM-DD` (date not in the future) and no existing tag → release: run the full `test.yml` matrix, then `npm publish` (stable → `@latest`, pre-release like `v1.2.0-rc.1` → `@next`), then create the tag + GitHub Release with the changelog body as notes.
+- Already-tagged version at the top → skip silently (safe to re-merge). Publish happens **before** tagging, so a failed publish leaves no tag and retries on the next push.
+
+`package.json`'s committed `version` is a placeholder (`0.0.0`); the changelog governs. npm publish uses **Trusted Publishing / OIDC** (`id-token: write`, no `NPM_TOKEN`); the release job checks out and tags with `secrets.RELEASE_PAT`.

@@ -1,6 +1,6 @@
 {
   "name": "strongbox-cli",
-  "version": "0.0.1",
+  "version": "0.0.0",
   "description": "Independent CLI client for the Strongbox password manager",
   "type": "module",
   "license": "MIT",

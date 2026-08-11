@@ -8,30 +8,36 @@ on:
 jobs:
   detect-release:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     outputs:
       version: ${{ steps.parse.outputs.version }}
       prerelease: ${{ steps.parse.outputs.prerelease }}
     steps:
-      - uses: actions/checkout@v6
-        with:
-          fetch-tags: true
+      - uses: actions/checkout@v4
 
       - name: Parse latest changelog version
         id: parse
         env:
-          GH_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          # Extract the first heading that matches: ## [vX.Y.Z...] - YYYY-MM-DD
-          # The date is required — headings without a date are treated as drafts.
-          HEADING=$(grep -P '^## \[v[^\]]+\]\s+-\s+\d{4}-\d{2}-\d{2}' CHANGELOG.md | head -1)
+          # The topmost `## [...]` heading governs, dated or not.
+          #
+          # Deliberately NOT "the topmost *dated* heading": that made a typo in
+          # the newest entry's date invisible. The heading simply failed to
+          # match, the search fell through to an older entry — or to nothing —
+          # and the run reported success having done nothing at all. A heading
+          # that was meant to release has to fail loudly, not silently.
+          HEADING=$(grep -m1 -P '^## \[' CHANGELOG.md || true)
 
           if [ -z "$HEADING" ]; then
-            echo "No dated release heading found — nothing to release."
+            echo "No version headings in CHANGELOG.md — nothing to release."
             echo "version=" >> "$GITHUB_OUTPUT"
             exit 0
           fi
 
           VERSION=$(echo "$HEADING" | grep -oP '(?<=\[)[^\]]+')
+          REST=$(echo "$HEADING" | sed -E 's/^## \[[^]]*\]//')   # whatever follows the version
 
           # Must be valid semver with v prefix
           if [[ ! "$VERSION" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z0-9._-]+)?$ ]]; then
@@ -39,32 +45,58 @@ jobs:
             exit 1
           fi
 
-          # Check if this tag already exists on the remote.  This must happen
-          # BEFORE the date check below: the grep above picks the first DATED
-          # heading, which for a repo in the normal "drafting the next release"
-          # state will be the previous (already-released) version because the
-          # unreleased draft heading intentionally has no date.  Failing the
-          # date check in that situation would break every push to main until
-          # a new release is cut.
-          if git rev-parse "refs/tags/$VERSION" >/dev/null 2>&1; then
-            echo "Tag $VERSION already exists — skipping release."
+          # Has this already shipped? This check has to come BEFORE any
+          # validation of the entry, because a released entry keeps sitting at
+          # the top of the changelog: every later push to main re-parses it.
+          # Validating first rejects an already-published entry as a malformed
+          # new release — that's what used to turn main red after every release.
+          #
+          # Ask the remote rather than the local clone: checkout doesn't
+          # reliably bring tags down, so a missing local tag proves nothing.
+          if [ -n "$(git ls-remote --tags origin "refs/tags/$VERSION")" ]; then
+            echo "Tag $VERSION already exists — already released, nothing to do."
             echo "version=" >> "$GITHUB_OUTPUT"
             exit 0
           fi
 
-          # Check if a GitHub release already exists
-          if gh release view "$VERSION" >/dev/null 2>&1; then
-            echo "::error::GitHub release $VERSION already exists but tag does not — manual cleanup needed"
+          # Past this point the entry is genuinely unreleased.
+
+          # No date at all is a draft: mergeable to main without releasing.
+          if [ -z "${REST//[[:space:]]/}" ]; then
+            echo "$VERSION has no date — draft entry, nothing to release."
+            echo "version=" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          # Anything else has to be a date. The `-` separator is optional, so
+          # both `] - 2026-07-31` and `] 2026-07-31` release; anything else is a
+          # typo in an entry that was clearly meant to ship, and fails here
+          # rather than being mistaken for a draft and skipped in silence.
+          if [[ ! "$REST" =~ ^[[:space:]]*-?[[:space:]]*([0-9]{4}-[0-9]{2}-[0-9]{2})[[:space:]]*$ ]]; then
+            echo "::error::Changelog heading for $VERSION trails '$(echo "$REST" | xargs)', which is not a YYYY-MM-DD date. Use '## [$VERSION] - YYYY-MM-DD' to release it, or drop the trailing text to keep it a draft."
+            exit 1
+          fi
+          ENTRY_DATE="${BASH_REMATCH[1]}"
+
+          if ! date -u -d "$ENTRY_DATE" >/dev/null 2>&1; then
+            echo "::error::Changelog date $ENTRY_DATE for $VERSION is not a real date"
             exit 1
           fi
 
-          # Verify the date is today (UTC ±12h to accommodate any timezone)
-          ENTRY_DATE=$(echo "$HEADING" | grep -oP '\d{4}-\d{2}-\d{2}')
-          YESTERDAY=$(date -u -d '-12 hours' +%Y-%m-%d)
-          TODAY=$(date -u +%Y-%m-%d)
-          TOMORROW=$(date -u -d '+12 hours' +%Y-%m-%d)
-          if [[ "$ENTRY_DATE" != "$YESTERDAY" && "$ENTRY_DATE" != "$TODAY" && "$ENTRY_DATE" != "$TOMORROW" ]]; then
-            echo "::error::Changelog date $ENTRY_DATE does not match today — expected $YESTERDAY, $TODAY, or $TOMORROW"
+          # The date marks an entry as ready to publish, not as fresh. It may be
+          # in the past: when a release attempt fails (say, on tests) the entry
+          # stays untagged and the next push to main retries it — the documented
+          # behaviour. A date in the future is a typo, though; this workflow has
+          # no way to defer a release, so the entry would publish immediately.
+          LATEST=$(date -u -d '+12 hours' +%Y-%m-%d)   # +12h so any timezone's "today" is accepted
+          if [[ "$ENTRY_DATE" > "$LATEST" ]]; then
+            echo "::error::Changelog date $ENTRY_DATE for $VERSION is in the future — expected $LATEST or earlier"
+            exit 1
+          fi
+
+          # A release with no tag means an earlier run half-completed.
+          if gh release view "$VERSION" >/dev/null 2>&1; then
+            echo "::error::GitHub release $VERSION already exists but tag does not — manual cleanup needed"
             exit 1
           fi
 
@@ -78,69 +110,74 @@ jobs:
           echo "prerelease=$PRERELEASE" >> "$GITHUB_OUTPUT"
           echo "Detected version=$VERSION prerelease=$PRERELEASE"
 
-  build:
+  # v1.2.0 shipped while the Test workflow was red: the release ran its own
+  # `bun test` on ubuntu only, so a Windows-only failure never reached it.
+  # Gate on the whole matrix instead, and only when actually releasing.
+  test:
     needs: detect-release
     if: needs.detect-release.outputs.version != ''
-    uses: ./.github/workflows/build-reusable.yml
+    uses: ./.github/workflows/test.yml
 
   release:
-    needs: [detect-release, build]
+    needs: [detect-release, test]
+    if: needs.detect-release.outputs.version != ''
     runs-on: ubuntu-latest
     permissions:
-      contents: write
+      contents: read
       id-token: write
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v4
         with:
           token: ${{ secrets.RELEASE_PAT }}
-
-      - uses: actions/setup-node@v6
-        with:
-          node-version: 24
-          registry-url: https://registry.npmjs.org
 
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: latest
 
-      - name: Ensure npm supports trusted publishing
-        # Trusted publishing / automatic OIDC detection requires npm CLI
-        # v11.5.1 or later (see https://github.blog/changelog/2025-07-31-npm-trusted-publishing-with-oidc-is-generally-available/).
-        # The npm that ships with setup-node@v6 + node 24 is new enough at
-        # time of writing, but belt and braces: force-install the latest.
-        run: npm install -g npm@latest
-
-      - name: Install dependencies and build
-        # Run against the UNMODIFIED package.json so `bun install
-        # --frozen-lockfile` can verify the lockfile.  The "Set package
-        # version" step below edits package.json, but `npm publish` reads
-        # it directly at publish time, so the edits still apply to the
-        # published artifact.
-        run: |
-          bun install --frozen-lockfile --ignore-scripts
-          bun run build
+      - run: bun install --frozen-lockfile
 
       - name: Set package version
         run: |
           VERSION="${{ needs.detect-release.outputs.version }}"
-          SEMVER="${VERSION#v}"
-          npm version "$SEMVER" --no-git-tag-version
+          # The changelog is the source of truth; package.json's committed
+          # version is only a placeholder. --allow-same-version because
+          # `npm version` treats "already that version" as an error, which
+          # would fail the release whenever the two happen to agree.
+          npm version "${VERSION#v}" --no-git-tag-version --allow-same-version
 
       - name: Extract changelog entry
         id: changelog
         run: |
-          # Capture everything after the first `## [` heading up to (but not
-          # including) the next one.
+          VERSION="${{ needs.detect-release.outputs.version }}"
+          # Extract the body of the first changelog section (between first ## and second ##)
           BODY=$(awk '/^## \[/{if(found) exit; found=1; next} found' CHANGELOG.md)
+          # Write to file for the release body
           echo "$BODY" > /tmp/release-body.md
 
-      - name: Create Git tag
-        run: |
-          VERSION="${{ needs.detect-release.outputs.version }}"
-          git tag "$VERSION"
-          git push origin "$VERSION"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
 
-      - name: Create GitHub Release
+      # npm publish runs BEFORE the tag exists, because detect-release treats
+      # the tag as proof the version shipped. Tagging first meant a failed
+      # publish (bad npm credentials, say) left a tag behind that made every
+      # later run skip the version as already released — the release could
+      # never be retried without deleting the tag by hand. Failing here now
+      # leaves nothing behind, so the next push to main just tries again.
+      - name: Publish to npm
+        run: |
+          TAG="latest"
+          if [ "${{ needs.detect-release.outputs.prerelease }}" = "true" ]; then
+            TAG="next"
+          fi
+          npm publish --access public --tag "$TAG"
+
+      # One step, not two: gh creates the tag at --target when it doesn't
+      # already exist, so there is no window where the tag is visible but the
+      # release isn't — which detect-release would read as "already shipped"
+      # and skip in silence.
+      - name: Create Git tag and GitHub Release
         env:
           GH_TOKEN: ${{ secrets.RELEASE_PAT }}
         run: |
@@ -151,23 +188,7 @@ jobs:
             FLAGS="--prerelease"
           fi
           gh release create "$VERSION" \
+            --target "$GITHUB_SHA" \
             --title "$VERSION" \
             --notes-file /tmp/release-body.md \
             $FLAGS
-
-      - name: Publish to npm
-        # No NODE_AUTH_TOKEN / NPM_TOKEN.  Trusted publishing uses the
-        # OIDC token minted from `id-token: write` above and matched
-        # against the Trusted Publisher rule configured on npmjs.com:
-        #   Package settings → Trusted Publisher → GitHub Actions
-        #     Organization/user: <your username>
-        #     Repository:        strongbox-cli
-        #     Workflow filename: release.yml
-        #     Environment name:  (leave blank, or match below)
-        # Provenance attestations are generated automatically.
-        run: |
-          TAG="latest"
-          if [ "${{ needs.detect-release.outputs.prerelease }}" = "true" ]; then
-            TAG="next"
-          fi
-          npm publish --access public --tag "$TAG"

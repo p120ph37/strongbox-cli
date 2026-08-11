@@ -1,0 +1,35 @@
+name: Test
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  # Called by the release workflow so a release runs this exact matrix, rather
+  # than a subset of it that can be green while this one is red.
+  workflow_call:
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      # macOS is the only platform Strongbox runs on, but the transport /
+      # crypto / framing code is pure TypeScript, so ubuntu gives a fast
+      # cross-platform sanity check. Integration tests need a real Strongbox
+      # and are skipped everywhere in CI.
+      matrix:
+        os: [macos-latest, ubuntu-latest]
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - run: bun install --frozen-lockfile
+
+      - run: bun run typecheck
+
+      - run: bun test
