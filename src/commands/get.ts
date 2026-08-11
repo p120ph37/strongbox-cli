@@ -2,6 +2,7 @@ import { Command } from 'commander';
 import {
   applyGlobalOpts,
   emit,
+  fullView,
   publicView,
   resolveEntry,
   withSession,
@@ -13,6 +14,8 @@ import type { Credential } from '../protocol/messages.ts';
 
 interface GetOpts {
   field?: string;
+  reveal?: boolean;
+  icon?: boolean;
 }
 
 /** Named built-in fields; anything else is looked up as a custom-field key. */
@@ -30,6 +33,8 @@ function fieldValue(c: Credential, name: string): string {
       return c.uuid;
     case 'notes':
       return c.notes;
+    case 'icon':
+      return c.icon;
     case 'totp': {
       if (!c.totp) throw new UserError(`entry "${c.title}" has no TOTP configured`);
       return totpFromUri(c.totp, Date.now());
@@ -59,20 +64,22 @@ export function registerGetCommand(program: Command): void {
     .description('retrieve one entry by UUID or exact title')
     .option(
       '--field <name>',
-      'print only the named field: password, username, totp (current code), ' +
-        'totp-uri, totp-secret, url, notes, or a custom key',
+      'print only the named field: password, username, url, title, uuid, notes, ' +
+        'icon, totp (current code), totp-uri, totp-secret, or a custom-field key',
     )
+    .option('--reveal', 'print the full record including secrets (password, TOTP URI, notes, custom values)')
+    .option('--icon', 'include the icon (a multi-KB data URI, omitted by default) in the record view')
     .action(async (ref: string, opts: GetOpts) => {
       const parent = program.opts<GlobalOpts>();
       applyGlobalOpts(parent);
       const entry = await withSession((s) => resolveEntry(s, ref));
 
-      // With --field the user has explicitly asked for that value, so a secret
-      // field is fair game. Without it, print the non-secret projection only.
+      // A named field is a specific request — always the full value.
       if (opts.field) {
         emit(fieldValue(entry, opts.field), Boolean(parent.json));
         return;
       }
-      emit(publicView(entry), Boolean(parent.json));
+      const view = opts.reveal ? fullView(entry) : publicView(entry);
+      emit(opts.icon ? { ...view, icon: entry.icon } : view, Boolean(parent.json));
     });
 }

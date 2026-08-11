@@ -299,7 +299,7 @@ mapped the slots not driven by the extension UI:
 | 10  | `GetIconRequest`                | favicon / entry-icon fetch; request schema TBD                                                                                                                         |
 | 14  | `GetFavouritesRequest`          | **schema confirmed** — request `{}`, response `{results: Credential[]}`; see §5.12                                                                                     |
 | 15  | `CopyFieldRequest`              | names the same class as mt=3 but **rejects** mt=3's exact field set (`{databaseId,nodeId,explicitTotp,field}`) — needs a different/richer payload; role still unmapped |
-| ≥16 | —                               | `errorMessage="Could not convert request to JSON"` — slot not dispatched                                                                                               |
+| ≥16 | —                               | not dispatched — `errorMessage="Could not convert request to JSON"`. Confirmed by sweeping every slot 16–99 (2026-08-11); the dispatch surface is exactly mt=0–15. In particular there is **no file/attachment-retrieval op** — `attachmentFileNames` can be enumerated but never fetched. |
 
 Since this sweep, mt = 1 and mt = 14 have had their full schemas recovered
 (see §5.1a and §5.12) — mt=1's `query` field by guess-and-check against the

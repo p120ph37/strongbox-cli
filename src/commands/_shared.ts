@@ -114,6 +114,31 @@ export function publicView(c: Credential): Record<string, unknown> {
 }
 
 /**
+ * Full projection including the fields `publicView` hides — `password`, the
+ * `totp` otpauth URI, `notes`, and custom-field *values*. For `get --reveal`,
+ * an explicit "show everything" request. Omits `icon` (a bulky display asset,
+ * not credential data); `get --icon` or `get --field icon` retrieve it.
+ */
+export function fullView(c: Credential): Record<string, unknown> {
+  return {
+    uuid: c.uuid,
+    databaseId: c.databaseId,
+    databaseName: c.databaseName,
+    title: c.title,
+    username: c.username,
+    password: c.password,
+    url: c.url,
+    totp: c.totp,
+    notes: c.notes,
+    favourite: c.favourite,
+    tags: c.tags,
+    customFields: c.customFields,
+    attachmentFileNames: c.attachmentFileNames,
+    modified: c.modified,
+  };
+}
+
+/**
  * Emit output honoring --json. Scalars and structured objects are handled
  * differently so that shell pipelines work cleanly in the default mode.
  */

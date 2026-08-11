@@ -60,13 +60,14 @@ strongbox-cli list                           # unlocked databases
 strongbox-cli search [query]                 # full-text search (no query lists all)
 strongbox-cli url <url>                       # credentials for a page URL
 strongbox-cli get <ref> [--field <name>]      # one entry by UUID or title
+strongbox-cli get <ref> --reveal              # ...with all secret fields shown
 strongbox-cli totp <ref>                      # current TOTP code (incl. Steam)
 strongbox-cli copy <ref> [--field <name>]     # copy a field to the clipboard
 strongbox-cli add <title> [...]               # create an entry
 strongbox-cli diagnose                        # health-check the integration
 ```
 
-`--field` on `get` extracts a single value including `password`, `totp` (live code), `totp-uri`, and `totp-secret` (e.g. for `oathtool`). Secrets are printed only when explicitly requested; `--json` gives structured output. Editing and deleting entries are not supported — the protocol has no update or delete operation.
+By default `get` hides secret fields. `get <ref> --reveal` prints the full record (password, TOTP URI, notes, custom-field values); `get <ref> --field <name>` prints one value — `password`, `notes`, a custom-field key, or `totp` (live code), `totp-uri`, `totp-secret` (e.g. for `oathtool`). The entry icon (a multi-KB data URI) is omitted from record views unless you pass `--icon`. `--json` gives structured output. Editing and deleting entries are not supported — the protocol has no update or delete operation.
 
 ## Contributing
 

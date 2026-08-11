@@ -6,7 +6,10 @@ import { totpFromUri } from '../util/totp.ts';
 export function registerTotpCommand(program: Command): void {
   program
     .command('totp <ref>')
-    .description('current TOTP code for an entry (by UUID or exact title)')
+    .description(
+      'current TOTP code for an entry (by UUID or exact title); ' +
+        'for the raw secret use `get <ref> --field totp-secret` (or `totp-uri`)',
+    )
     .action(async (ref: string) => {
       const parent = program.opts<GlobalOpts>();
       applyGlobalOpts(parent);
