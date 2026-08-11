@@ -1,14 +1,11 @@
 /**
  * Client identity persistence.
  *
- * The most plausible handshake model (to be confirmed by capture; see
- * docs/PROTOCOL.md §4.1) is trust-on-first-use: we generate a keypair once,
- * show it to Strongbox the first time we connect, the user approves us in
- * the Strongbox UI, and subsequent sessions skip the prompt because
- * Strongbox has remembered our public key.
- *
- * For that to work, *our* private key has to persist across invocations.
- * This module owns that persistence.
+ * Strongbox 1.63.1 was observed accepting an unseen client public key with
+ * no approval prompt (docs/PROTOCOL.md §4.1), so persistence buys us nothing
+ * today. We persist anyway: it is cheap, it keeps our identity stable in
+ * Strongbox's eyes, and it future-proofs against a later version adding the
+ * trust-on-first-use prompt the protocol shape clearly allows for.
  *
  * File layout:
  *
@@ -98,7 +95,7 @@ export async function createIdentity(): Promise<Identity> {
     secretKey: await toBase64(kp.secretKey),
   };
   await writeFile(IDENTITY_PATH, JSON.stringify(file, null, 2), { mode: 0o600 });
-  // writeFile's `mode` isn't always honoured on existing files; enforce it.
+  // writeFile's `mode` isn't always honored on existing files; enforce it.
   await chmod(IDENTITY_PATH, 0o600);
   trace('created new identity:', IDENTITY_PATH);
   return { keyPair: kp, createdAt: now, path: IDENTITY_PATH };

@@ -6,6 +6,7 @@ import { registerSearchCommand } from './commands/search.ts';
 import { registerGetCommand } from './commands/get.ts';
 import { registerUrlCommand } from './commands/url.ts';
 import { registerTotpCommand } from './commands/totp.ts';
+import { registerCopyCommand } from './commands/copy.ts';
 import { StrongboxError } from './util/errors.ts';
 import { VERSION } from './version.ts';
 
@@ -25,6 +26,7 @@ registerSearchCommand(program);
 registerGetCommand(program);
 registerUrlCommand(program);
 registerTotpCommand(program);
+registerCopyCommand(program);
 
 try {
   await program.parseAsync(process.argv);

@@ -48,7 +48,7 @@ describe('crypto/box', () => {
     const bob = await generateKeyPair();
     const nonce = await randomNonce();
 
-    const plaintext = new TextEncoder().encode('don\'t touch this');
+    const plaintext = new TextEncoder().encode("don't touch this");
     const ciphertext = await seal({
       plaintext,
       nonce,

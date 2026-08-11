@@ -30,9 +30,7 @@ const CHROME_MANIFEST_DIRS = [
   '~/Library/Application Support/Arc/User Data/NativeMessagingHosts',
 ];
 
-const FIREFOX_MANIFEST_DIRS = [
-  '~/Library/Application Support/Mozilla/NativeMessagingHosts',
-];
+const FIREFOX_MANIFEST_DIRS = ['~/Library/Application Support/Mozilla/NativeMessagingHosts'];
 
 export interface NativeMessagingManifest {
   /** Absolute path to the .json manifest on disk. */

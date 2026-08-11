@@ -1,19 +1,19 @@
 import { Command } from 'commander';
-import { applyGlobalOpts, type GlobalOpts } from './_shared.ts';
-import { UnimplementedError } from '../util/errors.ts';
+import { applyGlobalOpts, emit, resolveEntry, withSession, type GlobalOpts } from './_shared.ts';
+import { UserError } from '../util/errors.ts';
+import { totpFromUri } from '../util/totp.ts';
 
 export function registerTotpCommand(program: Command): void {
   program
     .command('totp <ref>')
-    .description('current TOTP code for an entry')
-    .action((_ref: string) => {
+    .description('current TOTP code for an entry (by UUID or exact title)')
+    .action(async (ref: string) => {
       const parent = program.opts<GlobalOpts>();
       applyGlobalOpts(parent);
-      // The only TOTP-related op observed is messageType=3 (CopyField) with
-      // explicitTotp=true, which injects the code via the OS paste path
-      // rather than returning it. Returning TOTP to stdout needs a
-      // different (unobserved) op, or decoding the stored TOTP URI
-      // client-side from a Credential record.
-      throw new UnimplementedError('totp — no observed return-TOTP messageType');
+      const entry = await withSession((s) => resolveEntry(s, ref));
+      if (!entry.totp) throw new UserError(`entry "${entry.title}" has no TOTP configured`);
+      // Strongbox returns the shared secret as an otpauth URI, not a live
+      // code; compute the digits locally (RFC 6238).
+      emit(totpFromUri(entry.totp, Date.now()), Boolean(parent.json));
     });
 }

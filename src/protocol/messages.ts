@@ -76,6 +76,7 @@ export interface ResponseEnvelope {
  */
 export const MessageType = {
   Hello: 0,
+  Search: 1,
   CredentialsForUrl: 2,
   CopyField: 3,
   LockDatabase: 4,
@@ -85,6 +86,7 @@ export const MessageType = {
   GeneratePassword: 11,
   GetPasswordStrength: 12,
   GetNewEntryDefaultsV2: 13,
+  GetFavourites: 14,
 } as const;
 
 export type MessageTypeValue = (typeof MessageType)[keyof typeof MessageType];
@@ -93,6 +95,11 @@ export type MessageTypeValue = (typeof MessageType)[keyof typeof MessageType];
 
 /**
  * One entry in the Hello response's `databases` array.
+ *
+ * `autoFillEnabled` is the per-database "Enable AutoFill for this Database"
+ * setting and gates entry visibility: when false, the database is still listed
+ * here but none of its entries appear in mt=1/mt=2/mt=14 (see PROTOCOL.md
+ * §5.1). It is independent of `locked`.
  */
 export interface DatabaseSummary {
   readonly uuid: string;
@@ -133,6 +140,18 @@ export interface GeneratedPassword {
 }
 
 /**
+ * One custom (user-defined) field on an entry. `concealable` is a display
+ * hint only — Strongbox marks a field as sensitive so a UI can mask it, but
+ * the `value` is still transmitted in the clear regardless. Do not treat
+ * `concealable: true` as "this value was withheld".
+ */
+export interface CustomField {
+  readonly key: string;
+  readonly value: string;
+  readonly concealable: boolean;
+}
+
+/**
  * Full credential record as returned by Create-Entry. Field set is as
  * captured; empty-array / empty-string fields (`tags`, `customFields`,
  * `attachmentFileNames`, `notes`, `totp`) are always present on the wire
@@ -146,14 +165,28 @@ export interface Credential {
   readonly username: string;
   readonly password: string;
   readonly url: string;
+  /**
+   * An `otpauth://` URI, not a live code — the client computes the digits
+   * itself. Empty string when the entry has no TOTP configured.
+   */
   readonly totp: string;
   readonly notes: string;
   readonly favourite: boolean;
   readonly tags: readonly string[];
-  readonly customFields: readonly unknown[];
+  readonly customFields: readonly CustomField[];
+  /**
+   * Filenames of *non-key* attachments only. Strongbox omits SSH-agent
+   * material (`id_ed25519`, `KeeAgent.settings`) from this list, so it is a
+   * filtered view — not a complete attachment inventory. See PROTOCOL.md §5.6.
+   */
   readonly attachmentFileNames: readonly string[];
+  /** `data:image/png;base64,…` — runs to several KB. Never inline it in default output. */
   readonly icon: string;
-  /** Human-formatted timestamp, e.g. `"Today at 5:17 PM"`. Not ISO. */
+  /**
+   * Locale-formatted for display, e.g. `"Today at 5:17 PM"` or
+   * `"Apr 17, 2026 at 1:45 PM"`. Not ISO 8601 and not reliably parseable —
+   * treat as opaque and do not sort on it.
+   */
   readonly modified: string;
 }
 
@@ -168,6 +201,23 @@ export interface HelloRequest {
   readonly __tag?: 'Hello';
 }
 
+/**
+ * `messageType=1`. Generic full-text search across all unlocked databases.
+ * Only `query` is required; `query: ""` matches everything. Matching spans
+ * title, username, notes, and custom-field values (so it searches secret
+ * material), but NOT the UUID. Strongbox names the class `SearchRequest`; the
+ * `query` field name was recovered by guess-and-check, not from source.
+ *
+ * `take` is clamped server-side to ~64 no matter what is requested, so the
+ * full result set is only reachable by paging on `skip` (advance by the count
+ * returned, stop on an empty page). See `searchEntries` in commands/_shared.
+ */
+export interface SearchRequest {
+  readonly query: string;
+  readonly skip?: number;
+  readonly take?: number;
+}
+
 /** `messageType=2`. Extension asks for entries matching a page URL. */
 export interface CredentialsForUrlRequest {
   readonly url: string;
@@ -178,9 +228,18 @@ export interface CredentialsForUrlRequest {
 }
 
 /**
- * `messageType=3`. Server is asked to inject a specific field of a
- * specific entry via the OS paste/keyboard-injection path. `field` is an
- * integer selector; observed value: 2 (password).
+ * `messageType=3` CopyField. Asks Strongbox to write one field of an entry to
+ * the **OS clipboard** (not keystroke injection — confirmed by clipboard
+ * read-back). The value is never returned; the response is just `{success}`.
+ *
+ * `field` is an integer selector, mapped by clipboard read-back:
+ * `0` = username, `1` = password, `2` = TOTP (Strongbox computes the current
+ * code server-side; it matches our own RFC 6238). Values ≥3 are rejected.
+ *
+ * `explicitTotp: true` means "the user explicitly asked for the code" and
+ * overrides Strongbox's per-database `autoFillCopyTotp` preference: with that
+ * preference off, `field: 2` copies only when `explicitTotp` is true. Send
+ * true whenever a TOTP copy is intended. `nodeId` is the entry UUID.
  */
 export interface CopyFieldRequest {
   readonly databaseId: string;
@@ -239,6 +298,14 @@ export interface GetNewEntryDefaultsV2Request {
   readonly databaseId: string;
 }
 
+/**
+ * `messageType=14`. Return favourited entries. On the wire the request is a
+ * literal `{}`. Strongbox names the class `GetFavouritesRequest`.
+ */
+export interface GetFavouritesRequest {
+  readonly __tag?: 'GetFavourites';
+}
+
 /* ─── Inner response shapes, keyed by the request's messageType ────────── */
 
 /** `messageType=0`. */
@@ -248,13 +315,21 @@ export interface HelloResponse {
   readonly serverSettings: ServerSettings;
 }
 
-/**
- * `messageType=2`. `results` typed as `unknown[]` because every observed
- * capture returned `[]`. Likely `readonly Credential[]` once a non-empty
- * search is captured; keep as `unknown` until confirmed.
- */
+/** `messageType=1`. Full-text search results. */
+export interface SearchResponse {
+  readonly results: readonly Credential[];
+}
+
+/** `messageType=14`. Favourited entries. Same record shape as a search hit. */
+export interface GetFavouritesResponse {
+  readonly results: readonly Credential[];
+}
+
+/** `messageType=2`. */
 export interface CredentialsForUrlResponse {
-  readonly results: readonly unknown[];
+  /** Confirmed `Credential[]` by the non-empty captures under `10-mt2-results-two/`. */
+  readonly results: readonly Credential[];
+  /** Count of *unlocked databases*, not of results. Zero when everything is locked. */
   readonly unlockedDatabaseCount: number;
 }
 
@@ -302,6 +377,7 @@ export interface GetNewEntryDefaultsV2Response {
  */
 export interface RpcTypeMap {
   readonly [MessageType.Hello]: { request: HelloRequest; response: HelloResponse };
+  readonly [MessageType.Search]: { request: SearchRequest; response: SearchResponse };
   readonly [MessageType.CredentialsForUrl]: {
     request: CredentialsForUrlRequest;
     response: CredentialsForUrlResponse;
@@ -309,7 +385,10 @@ export interface RpcTypeMap {
   readonly [MessageType.CopyField]: { request: CopyFieldRequest; response: AckResponse };
   readonly [MessageType.LockDatabase]: { request: LockDatabaseRequest; response: AckResponse };
   readonly [MessageType.UnlockDatabase]: { request: UnlockDatabaseRequest; response: AckResponse };
-  readonly [MessageType.CreateEntry]: { request: CreateEntryRequest; response: CreateEntryResponse };
+  readonly [MessageType.CreateEntry]: {
+    request: CreateEntryRequest;
+    response: CreateEntryResponse;
+  };
   readonly [MessageType.ListGroups]: { request: ListGroupsRequest; response: ListGroupsResponse };
   readonly [MessageType.GeneratePassword]: {
     request: GeneratePasswordRequest;
@@ -322,6 +401,10 @@ export interface RpcTypeMap {
   readonly [MessageType.GetNewEntryDefaultsV2]: {
     request: GetNewEntryDefaultsV2Request;
     response: GetNewEntryDefaultsV2Response;
+  };
+  readonly [MessageType.GetFavourites]: {
+    request: GetFavouritesRequest;
+    response: GetFavouritesResponse;
   };
 }
 

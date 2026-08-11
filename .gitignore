@@ -19,3 +19,7 @@ docs/captures/local/
 
 # Bun
 bun.lockb
+
+# stray test-entry attachment source files (not part of the repo)
+sentinel-a.txt
+sentinel file b.png

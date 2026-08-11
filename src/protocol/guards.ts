@@ -17,6 +17,7 @@ import {
   type Credential,
   type CredentialsForUrlRequest,
   type CredentialsForUrlResponse,
+  type CustomField,
   type DatabaseSummary,
   type GeneratePasswordRequest,
   type GeneratePasswordResponse,
@@ -36,6 +37,8 @@ import {
   type ResponseEnvelope,
   type RpcRequestFor,
   type RpcResponseFor,
+  type SearchRequest,
+  type SearchResponse,
   type ServerSettings,
   type UnlockDatabaseRequest,
 } from './messages.ts';
@@ -75,7 +78,7 @@ export function isMessageTypeValue(x: unknown): x is MessageTypeValue {
 }
 
 /**
- * Recognise a request envelope. The envelope itself is plaintext JSON; the
+ * Recognize a request envelope. The envelope itself is plaintext JSON; the
  * ciphertext inside `message` is not validated here.
  */
 export function isRequestEnvelope(x: unknown): x is RequestEnvelope {
@@ -89,7 +92,7 @@ export function isRequestEnvelope(x: unknown): x is RequestEnvelope {
 }
 
 /**
- * Recognise a response envelope. As with requests the ciphertext is opaque
+ * Recognize a response envelope. As with requests the ciphertext is opaque
  * to this guard; callers decrypt it separately.
  */
 export function isResponseEnvelope(x: unknown): x is ResponseEnvelope {
@@ -128,15 +131,16 @@ function isServerSettings(x: unknown): x is ServerSettings {
 
 function isPasswordStrength(x: unknown): x is PasswordStrength {
   return (
-    isObject(x) &&
-    isNumber(x['entropy']) &&
-    isString(x['category']) &&
-    isString(x['summaryString'])
+    isObject(x) && isNumber(x['entropy']) && isString(x['category']) && isString(x['summaryString'])
   );
 }
 
 function isGeneratedPassword(x: unknown): x is GeneratedPassword {
   return isObject(x) && isString(x['password']) && isPasswordStrength(x['strength']);
+}
+
+function isCustomField(x: unknown): x is CustomField {
+  return isObject(x) && isString(x['key']) && isString(x['value']) && isBoolean(x['concealable']);
 }
 
 function isCredential(x: unknown): x is Credential {
@@ -154,6 +158,7 @@ function isCredential(x: unknown): x is Credential {
     isBoolean(x['favourite']) &&
     isStringArray(x['tags']) &&
     isArray(x['customFields']) &&
+    x['customFields'].every(isCustomField) &&
     isStringArray(x['attachmentFileNames']) &&
     isString(x['icon']) &&
     isString(x['modified'])
@@ -165,6 +170,10 @@ function isCredential(x: unknown): x is Credential {
 function isHelloRequest(_x: unknown): _x is HelloRequest {
   // Hello has no inner JSON payload — see RequestEnvelope. Nothing to check.
   return true;
+}
+
+function isSearchRequest(x: unknown): x is SearchRequest {
+  return isObject(x) && isString(x['query']);
 }
 
 function isCredentialsForUrlRequest(x: unknown): x is CredentialsForUrlRequest {
@@ -225,8 +234,17 @@ function isHelloResponse(x: unknown): x is HelloResponse {
   );
 }
 
+function isResultsResponse(x: unknown): x is SearchResponse {
+  return isObject(x) && Array.isArray(x['results']) && x['results'].every(isCredential);
+}
+
 function isCredentialsForUrlResponse(x: unknown): x is CredentialsForUrlResponse {
-  return isObject(x) && Array.isArray(x['results']) && isNumber(x['unlockedDatabaseCount']);
+  return (
+    isObject(x) &&
+    Array.isArray(x['results']) &&
+    x['results'].every(isCredential) &&
+    isNumber(x['unlockedDatabaseCount'])
+  );
 }
 
 function isAckResponse(x: unknown): x is AckResponse {
@@ -280,6 +298,10 @@ export function isRpcRequestFor<K extends MessageTypeValue>(
   switch (messageType) {
     case MessageType.Hello:
       return isHelloRequest(payload);
+    case MessageType.Search:
+      return isSearchRequest(payload);
+    case MessageType.GetFavourites:
+      return isObject(payload); // request is a literal {}
     case MessageType.CredentialsForUrl:
       return isCredentialsForUrlRequest(payload);
     case MessageType.CopyField:
@@ -311,6 +333,9 @@ export function isRpcResponseFor<K extends MessageTypeValue>(
   switch (messageType) {
     case MessageType.Hello:
       return isHelloResponse(payload);
+    case MessageType.Search:
+    case MessageType.GetFavourites:
+      return isResultsResponse(payload);
     case MessageType.CredentialsForUrl:
       return isCredentialsForUrlResponse(payload);
     case MessageType.CopyField:

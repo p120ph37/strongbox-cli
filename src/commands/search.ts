@@ -1,18 +1,23 @@
 import { Command } from 'commander';
-import { applyGlobalOpts, type GlobalOpts } from './_shared.ts';
-import { UnimplementedError } from '../util/errors.ts';
+import {
+  applyGlobalOpts,
+  emit,
+  publicView,
+  searchEntries,
+  withSession,
+  type GlobalOpts,
+} from './_shared.ts';
 
 export function registerSearchCommand(program: Command): void {
   program
-    .command('search <query>')
-    .description('fuzzy-match entries by title across unlocked databases')
-    .action((_query: string) => {
+    .command('search [query]')
+    .description('full-text search entries across unlocked databases (no query lists all)')
+    .action(async (query: string | undefined) => {
       const parent = program.opts<GlobalOpts>();
       applyGlobalOpts(parent);
-      // mt=1 is dispatched as `SearchRequest` (per the 2026-04-20 probe
-      // sweep) but its full request schema is unobserved — the probes only
-      // recovered the class name, not the field set. Until a real title
-      // search is captured, treat this as unimplemented.
-      throw new UnimplementedError('search — mt=1 SearchRequest schema unobserved');
+      // Optional so `search` (or `search ''`) enumerates everything — commander
+      // rejects an empty string against a required <query>.
+      const entries = await withSession((s) => searchEntries(s, query ?? ''));
+      emit(entries.map(publicView), Boolean(parent.json));
     });
 }
