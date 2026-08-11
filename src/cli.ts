@@ -1,3 +1,4 @@
+#!/usr/bin/env bun
 import { Command } from 'commander';
 import { registerDiagnoseCommand } from './commands/diagnose.ts';
 import { registerStatusCommand } from './commands/status.ts';
@@ -9,14 +10,14 @@ import { registerTotpCommand } from './commands/totp.ts';
 import { registerCopyCommand } from './commands/copy.ts';
 import { registerAddCommand } from './commands/add.ts';
 import { StrongboxError } from './util/errors.ts';
-import { VERSION } from './version.ts';
+import pkg from '../package.json' with { type: 'json' };
 
 const program = new Command();
 
 program
   .name('strongbox-cli')
   .description('Independent CLI client for the Strongbox password manager')
-  .version(VERSION)
+  .version(pkg.version)
   .option('--json', 'emit machine-readable JSON on stdout', false)
   .option('-v, --verbose', 'log transport-level details to stderr', false);
 

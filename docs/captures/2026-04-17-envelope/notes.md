@@ -14,9 +14,8 @@ is a `crypto_box_easy` ciphertext (base64) whenever `messageType ≠ 0`.
 
 The ciphertext cannot be decrypted from these captures alone — the server's
 private key is held by Strongbox and the client's private key was held by
-the browser extension's in-memory context at the time of capture. Layer D
-(Frida on `crypto_box_easy` / `crypto_box_open_easy`) is required to
-recover plaintext; see `docs/REVERSE_ENGINEERING.md`.
+the browser extension's in-memory context at the time of capture. Plaintext
+recovery needed the MitM bridge in `../2026-04-20-layerD/`.
 
 ## Capture environment
 

@@ -11,11 +11,9 @@
  *   - 24-byte nonce
  *   - 16-byte MAC appended to ciphertext
  *
- * Whether the handshake uses the combined `crypto_box_easy` call or the split
- * `crypto_kx` (key-exchange) + `crypto_secretbox` construction is something
- * the wire captures (see docs/REVERSE_ENGINEERING.md, Layer D) will tell us.
- * The two alternatives share this keypair type, so choosing between them
- * later is a drop-in change.
+ * Wire captures confirmed the combined `crypto_box_easy` / `crypto_box_open_easy`
+ * construction (not a split `crypto_kx` + `crypto_secretbox`); see
+ * `docs/PROTOCOL.md` §4.
  *
  * Reference: https://doc.libsodium.org/public-key_cryptography/authenticated_encryption
  */

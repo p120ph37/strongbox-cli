@@ -69,9 +69,10 @@ Output rules: one value per invocation by default (scriptable); `--json` for str
 
 ## M8 — Distribution
 
-- [ ] Homebrew tap.
-- [ ] Single-file compiled binary via `bun build --compile`.
-- [ ] GitHub release workflow.
+- [x] npm package, run directly under Bun via the `bin` → `src/cli.ts` shebang
+  (`bun install -g strongbox-cli` / `bunx strongbox-cli`). No bundling step.
+- [x] GitHub release workflow (changelog-driven, npm Trusted Publishing).
+- [ ] Homebrew tap (optional; `bun install -g` covers most users).
 
 ## Non-timeline
 

@@ -2,7 +2,7 @@
 
 A clean-room, independent CLI client for the [Strongbox](https://strongboxsafe.com/) password manager on macOS, built on [Bun](https://bun.sh).
 
-**Status:** early bootstrap / protocol reverse-engineering phase. Nothing works yet.
+Query your running, already-unlocked Strongbox from the shell — the same way the browser extension does, without handing your master password to a script.
 
 ## Goals
 
@@ -42,39 +42,45 @@ This CLI impersonates the browser extension: it spawns `afproxy` with the browse
 - A Pro licence of Strongbox (the browser-extension IPC is a Pro feature).
 - Bun 1.1+.
 
-## Quickstart
+## Install
+
+Requires the [Bun](https://bun.sh) runtime.
 
 ```sh
-bun install
-bun run build
-./bin/strongbox-cli --help
+bun install -g strongbox-cli
 ```
 
-Nothing past `--help` is wired up yet. See [`docs/ROADMAP.md`](docs/ROADMAP.md).
+Or run without installing: `bunx strongbox-cli --help`.
 
-## Planned command surface
+## Commands
 
 ```sh
-strongbox-cli status                         # handshake + ping
-strongbox-cli list                           # enumerate unlocked databases
-strongbox-cli search <query>                 # fuzzy match titles
-strongbox-cli get <entry-ref> [--field=...]  # retrieve one field
-strongbox-cli url <url>                      # extension-style URL match
-strongbox-cli totp <entry-ref>               # current TOTP code
+strongbox-cli status                         # server version + database state
+strongbox-cli list                           # unlocked databases
+strongbox-cli search [query]                 # full-text search (no query lists all)
+strongbox-cli url <url>                       # credentials for a page URL
+strongbox-cli get <ref> [--field <name>]      # one entry by UUID or title
+strongbox-cli totp <ref>                      # current TOTP code (incl. Steam)
+strongbox-cli copy <ref> [--field <name>]     # copy a field to the clipboard
+strongbox-cli add <title> [...]               # create an entry
+strongbox-cli diagnose                        # health-check the integration
 ```
+
+`--field` on `get` extracts a single value including `password`, `totp` (live code), `totp-uri`, and `totp-secret` (e.g. for `oathtool`). Secrets are printed only when explicitly requested; `--json` gives structured output. Editing and deleting entries are not supported — the protocol has no update or delete operation.
 
 ## Contributing
 
-See [`CONTRIBUTING.md`](CONTRIBUTING.md) and [`docs/REVERSE_ENGINEERING.md`](docs/REVERSE_ENGINEERING.md).
+See [`CONTRIBUTING.md`](CONTRIBUTING.md) for the clean-room rules, and [`docs/PROTOCOL.md`](docs/PROTOCOL.md) for the protocol.
 
 ## Releases
 
-Releases are cut automatically from `CHANGELOG.md` by `.github/workflows/release.yml` when a heading of the form `## [vX.Y.Z] - YYYY-MM-DD` lands on `main`. The workflow:
+Releases are cut from `CHANGELOG.md` by `.github/workflows/release.yml` (see the changelog's own "Releasing" section for the author workflow). When the topmost heading is `## [vX.Y.Z] - YYYY-MM-DD` (dated, date not in the future) and no such tag exists yet, the workflow:
 
-1. Parses the changelog, validates the version is semver with a `v` prefix and the date is today (UTC ±12h).
-2. Runs the reusable build (typecheck, build, tests on Linux + macOS).
-3. Creates the git tag and a GitHub Release whose notes are the changelog entry body.
-4. Publishes to npm using **trusted publishing via OIDC** — no long-lived `NPM_TOKEN` secret. Provenance attestations are generated automatically and verifiable with `npm audit signatures`.
+1. Runs the full `test.yml` matrix (typecheck + tests on macOS + Linux).
+2. Publishes to npm using **trusted publishing via OIDC** — no long-lived `NPM_TOKEN`. Provenance is generated automatically and verifiable with `npm audit signatures`.
+3. Then creates the git tag and a GitHub Release whose notes are the changelog entry body. (Publish runs before tagging, so a failed publish leaves no tag and retries on the next push.)
+
+A dateless `## [vX.Y.Z]` heading is a draft — mergeable to `main` without releasing.
 
 ### One-time setup on npmjs.com
 

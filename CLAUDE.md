@@ -7,9 +7,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 This is an **MIT-licensed clean-room implementation** of a protocol whose reference implementation (Strongbox) is **AGPL-3.0**. Those licences are incompatible for code derivation, so this project operates under a strict Chinese-wall rule:
 
 - **Never read, quote, translate, or transliterate** code from `strongbox-password-safe/*` (notably `Strongbox` and `browser-autofill`). Not even to "check my answer".
-- Protocol knowledge comes from **public sources only**: Strongbox's public KB articles, Chrome/Firefox Native Messaging specs, libsodium docs, and empirical wire observation (see `docs/REVERSE_ENGINEERING.md`).
+- Protocol knowledge comes from **public sources only**: Strongbox's public KB articles, Chrome/Firefox Native Messaging specs, libsodium docs, and empirical wire observation (captures under `docs/captures/`).
 - When the wire shape isn't yet known, say so. `docs/PROTOCOL.md` uses "TBD (observe)" for anything unconfirmed; mirror that discipline in code with `unknown` + runtime guards in `src/protocol/guards.ts`, not speculative type declarations.
-- KeePassXC-Browser source is **fair game** for background (MIT/GPLv2/v3 compatible situation differs, and it's cited as useful prior art in `docs/RESEARCH_DIGEST.md`). Strongbox source is not.
+- KeePassXC-Browser source is **fair game** for background (its licence situation differs and it's useful prior art). Strongbox source is not.
 
 See `CONTRIBUTING.md` for the full rules. PRs that look source-derived get rejected regardless of correctness.
 
@@ -17,8 +17,7 @@ See `CONTRIBUTING.md` for the full rules. PRs that look source-derived get rejec
 
 ```sh
 bun install                              # install deps (Bun 1.1+ required)
-bun run dev -- <subcommand> [args]       # run CLI from source without building
-bun run build                            # bundle to ./bin/strongbox-cli
+bun run dev -- <subcommand> [args]       # run the CLI from source
 bun run typecheck                        # tsc --noEmit (strict mode, no any)
 bun run lint                             # eslint src tests
 bun run format                           # prettier --write src tests docs *.md

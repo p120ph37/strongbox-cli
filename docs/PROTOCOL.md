@@ -256,9 +256,8 @@ enumerated in §5.
 ## 5. RPC layer — observed messageTypes
 
 Plaintext for every `messageType` the extension emits was decoded on
-2026-04-20 via a back-to-back encryption MitM native host (see
-`docs/REVERSE_ENGINEERING.md` §"Layer D.1 — MitM" and the capture set at
-`docs/captures/2026-04-20-layerD/`). The table below summarizes each
+2026-04-20 via a back-to-back encryption MitM native host (see the capture set
+and its `notes.md` at `docs/captures/2026-04-20-layerD/`). The table below summarizes each
 operation; subsections give the full request/response schema and a
 redacted sample.
 
@@ -772,4 +771,5 @@ The protocol above is implemented, and the CLI is a thin layer over it:
    approval prompt on current Strongbox).
 5. Per invocation: open a session, send one RPC, print the result.
 
-See `docs/REVERSE_ENGINEERING.md` for the observation procedure that got us here.
+The capture sets under `docs/captures/` (each with a `notes.md`) record how each
+layer was observed.

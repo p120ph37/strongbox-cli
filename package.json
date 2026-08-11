@@ -21,10 +21,9 @@
     "macos"
   ],
   "bin": {
-    "strongbox-cli": "bin/strongbox-cli"
+    "strongbox-cli": "./src/cli.ts"
   },
   "files": [
-    "bin/",
     "src/",
     "README.md",
     "LICENSE",
@@ -34,7 +33,6 @@
     "access": "public"
   },
   "scripts": {
-    "build": "bun build ./src/cli.ts --target=bun --outfile=./bin/strongbox-cli",
     "dev": "bun run ./src/cli.ts",
     "test": "bun test",
     "test:integration": "STRONGBOX_CLI_INTEGRATION=1 bun test tests/integration",
