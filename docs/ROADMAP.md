@@ -50,12 +50,16 @@ Output rules: one value per invocation by default (scriptable); `--json` for str
 
 ## M6 — Write commands (conditional)
 
-Only if the protocol actually supports it and users ask for it:
-
-- [ ] `strongbox-cli add`
-- [ ] `strongbox-cli edit`
-
-Write paths need extra care around conflict resolution. Defer until read paths are solid.
+- [x] `strongbox-cli add` — mt=6 CreateEntry. Creates title/username/password/url
+      in a chosen database + group (`--group`, default root); password via
+      `--password`, `--password-stdin`, or `--generate`. **Limited by the protocol**:
+      mt=6 carries only those four fields, so notes/totp/tags/custom-fields cannot be
+      set at creation.
+- [ ] ~~`strongbox-cli edit`~~ — **not possible over this protocol.** The full
+      dispatch surface (mt=0–15) has no update or delete op; mt=6 has no entry-id
+      field and always creates a new UUID. The extension only ever creates (saving a
+      new login); editing/deleting is a Strongbox-app operation. Nothing to build
+      here unless a future Strongbox adds an update messageType.
 
 ## M7 — Ergonomics
 

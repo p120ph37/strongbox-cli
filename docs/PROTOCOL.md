@@ -497,6 +497,14 @@ Request:
 Response: `{ "uuid": "…", "credential": <Credential> }` where
 `Credential` has the full set of fields shown in §5.6.
 
+**This is the only write op, and it only creates.** The request carries just
+those seven fields — no entry id (the server assigns a fresh UUID), and no
+`notes`/`totp`/`tags`/`customFields`, so those cannot be set at creation. `icon`
+may be `""` (Strongbox stores no icon then). There is **no update or delete
+messageType** anywhere in the dispatch surface (mt=0–15), so entries can be
+created but not edited or removed over this protocol — those remain Strongbox-app
+operations. `serverSettings.supportsCreateNew` (Hello) gates create.
+
 ### 5.6 `Credential` record (used by mt=6 response and likely mt=2)
 
 ```jsonc

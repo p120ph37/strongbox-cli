@@ -25,7 +25,10 @@ date to this heading in the form `## [vX.Y.Z] - YYYY-MM-DD`.
 - Manifest discovery across Chrome, Chromium, Edge, Brave, Vivaldi, Arc, Firefox.
 - libsodium Crypto Box wrapper and persistent client identity.
 - CLI subcommands: `diagnose`, `status`, `list`, `url`, `search`, `get`, `totp`,
-  `copy` (all working). `add`/`edit` remain unimplemented (M6).
+  `copy`, `add` (all working). `add` creates via mt=6 CreateEntry
+  (title/username/password/url + `--group`; password via `--password`,
+  `--password-stdin`, or `--generate`). No `edit`/`delete`: the protocol has no
+  update op (mt=6 only creates, and there is no delete messageType).
 - `diagnose` reworked into a layered health check: Strongbox.app installed,
   process running (`pgrep`), Native Messaging manifest present (its absence
   reported as "browser-autofill extension feature is OFF"), afproxy path, and a
