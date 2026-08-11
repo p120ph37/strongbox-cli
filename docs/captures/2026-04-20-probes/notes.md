@@ -7,8 +7,8 @@ for every `messageType` the browser extension emits during normal
 use: 0, 2–7, 11–13. This left gaps at 1, 8, 9, 10, and everything
 from 14 upward. The probe sweep here fires one synthetic request per
 gap slot at a running Strongbox and records the server's response,
-specifically so the error strings can surface the *internal class
-name* Strongbox expects for that slot.
+specifically so the error strings can surface the _internal class
+name_ Strongbox expects for that slot.
 
 ## Tool
 
@@ -41,26 +41,26 @@ name is not needed.
 
 ## Class-name inventory
 
-| mt  | server request class         | notes                                                                 |
-| --- | ---------------------------- | --------------------------------------------------------------------- |
-| 1   | `SearchRequest`              | distinct from mt=2 (URL-keyed); generic search, args TBD              |
-| 2   | `CredentialsForUrlRequest`   | we'd been calling this "SearchByUrl"; rename to match Strongbox       |
-| 3   | `CopyFieldRequest`           | autofill-inject op                                                    |
-| 4   | `LockDatabaseRequest`        | **our code had this slot as "Unlock"; it is Lock**                    |
-| 5   | `UnlockDatabaseRequest`      | **our code had this slot as "Lock"; it is Unlock**                    |
-| 6   | `CreateEntryRequest`         | actual create-entry action                                            |
-| 7   | `CreateEntryRequest`         | reuses the same decode target as mt=6; returns groups — seems to be a "groups available to create into" op |
-| 8   | `GetNewEntryDefaultsRequest` | v1 of the "prepare new entry" op                                      |
-| 9   | *(empty-object accepted)*    | returns `{password, alternatives: string[]}` — multi-suggestion password generator; class name unrecovered |
-| 10  | `GetIconRequest`             | favicon / entry-icon fetch                                            |
-| 11  | *(empty-object accepted)*    | returns a single password; `GeneratePassword`-like; class name unrecovered |
-| 12  | `handleGetPasswordStrengthRequest` | the `handle` prefix is the Objective-C method name; model class is presumably `GetPasswordStrengthRequest` |
-| 13  | `GetNewEntryDefaultsRequestV2` | v2 of mt=8 — probably returns richer defaults                        |
-| 14  | `GetFavouritesRequest`       | `{}` was silently accepted with `{results: []}`; `[]` got the name    |
-| 15  | `CopyFieldRequest`           | same decode class as mt=3; role difference TBD                        |
-| ≥16 | — ("Could not convert request to JSON") | not dispatched                                             |
+| mt  | server request class                    | notes                                                                                                      |
+| --- | --------------------------------------- | ---------------------------------------------------------------------------------------------------------- |
+| 1   | `SearchRequest`                         | distinct from mt=2 (URL-keyed); generic search, args TBD                                                   |
+| 2   | `CredentialsForUrlRequest`              | we'd been calling this "SearchByUrl"; rename to match Strongbox                                            |
+| 3   | `CopyFieldRequest`                      | autofill-inject op                                                                                         |
+| 4   | `LockDatabaseRequest`                   | **our code had this slot as "Unlock"; it is Lock**                                                         |
+| 5   | `UnlockDatabaseRequest`                 | **our code had this slot as "Lock"; it is Unlock**                                                         |
+| 6   | `CreateEntryRequest`                    | actual create-entry action                                                                                 |
+| 7   | `CreateEntryRequest`                    | reuses the same decode target as mt=6; returns groups — seems to be a "groups available to create into" op |
+| 8   | `GetNewEntryDefaultsRequest`            | v1 of the "prepare new entry" op                                                                           |
+| 9   | _(empty-object accepted)_               | returns `{password, alternatives: string[]}` — multi-suggestion password generator; class name unrecovered |
+| 10  | `GetIconRequest`                        | favicon / entry-icon fetch                                                                                 |
+| 11  | _(empty-object accepted)_               | returns a single password; `GeneratePassword`-like; class name unrecovered                                 |
+| 12  | `handleGetPasswordStrengthRequest`      | the `handle` prefix is the Objective-C method name; model class is presumably `GetPasswordStrengthRequest` |
+| 13  | `GetNewEntryDefaultsRequestV2`          | v2 of mt=8 — probably returns richer defaults                                                              |
+| 14  | `GetFavouritesRequest`                  | `{}` was silently accepted with `{results: []}`; `[]` got the name                                         |
+| 15  | `CopyFieldRequest`                      | same decode class as mt=3; role difference TBD                                                             |
+| ≥16 | — ("Could not convert request to JSON") | not dispatched                                                                                             |
 
-The ops at mt=9 and mt=11 silently accept `{}` *and* silently accept
+The ops at mt=9 and mt=11 silently accept `{}` _and_ silently accept
 `[]` — i.e. they seem to ignore the request body entirely rather than
 decoding it. Their class names remain unknown; class-sniffing through
 error strings doesn't work for ops that never error on malformed input.
@@ -73,7 +73,7 @@ error strings doesn't work for ops that never error on malformed input.
   `{success: true}` response, so we couldn't tell lock from unlock from
   wire traffic alone — the class name in the error is the tiebreaker.
 - **mt=7**: the server decodes its request as `CreateEntryRequest` but
-  the *response* is a groups list. Working hypothesis: mt=7 is the
+  the _response_ is a groups list. Working hypothesis: mt=7 is the
   "get available groups to create into" companion to the actual Create
   at mt=6, and Strongbox reuses the request class because both ops
   only need a `databaseId` field.

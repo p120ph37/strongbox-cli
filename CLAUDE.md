@@ -41,19 +41,20 @@ strongbox-cli ──(Native Messaging stdio)──▶ afproxy ──(AF_UNIX)─
 ### Layered source layout
 
 - `src/cli.ts` — commander entry point. Registers subcommands, translates `StrongboxError` subclasses into exit codes (see `src/util/errors.ts`: 2=user, 3=environment, 4=not-running, 5=handshake, 6=transport, 7=protocol, 10=unimplemented).
-- `src/commands/` — one file per subcommand. Use helpers from `_shared.ts`: `applyGlobalOpts`, `withSession` (opens+closes a `Session`), and `emit` (honours `--json`). `diagnose` is the only subcommand fully implementable today; everything else depends on the handshake.
-- `src/protocol/session.ts` — the high-level object commands talk to. Owns manifest lookup → identity load → afproxy spawn → handshake → encrypted RPC. **The handshake and `rpc()` currently throw `HandshakeError` / `UnimplementedError` on purpose** until wire captures land (see `docs/PROTOCOL.md` §4.1). Interface is stable; implementation is the M3 milestone.
-- `src/protocol/messages.ts` + `guards.ts` — outer envelope (`RequestEnvelope` / `ResponseEnvelope`) and inner-RPC (`RpcRequest` / `RpcResponse`) types. The envelope shape is concrete (see captures under `docs/captures/2026-04-17-envelope/`). The inner RPC shape is still a hypothesis until Layer-D plaintext captures land. Runtime-validate anything coming off the wire through `guards.ts`; keep unknown fields as `unknown`, never `any`.
+- `src/commands/` — one file per subcommand. Use helpers from `_shared.ts`: `applyGlobalOpts`, `withSession` (opens+closes a `Session`), and `emit` (honours `--json`). `diagnose`, `status`, `list`, and `url` work end to end. `search`, `get`, and `totp` still throw `UnimplementedError` because their messageType schemas are unobserved — not because the transport is missing.
+- `src/protocol/session.ts` — the high-level object commands talk to. Owns manifest lookup → identity load → Hello key exchange → encrypted RPC. Note afproxy is **one-shot**: it exits after replying, so every `rpc()` spawns its own process and `close()` is a no-op. The Hello response is cached at open, so `rpc(Hello)` costs nothing.
+- `src/protocol/messages.ts` + `guards.ts` — outer envelope (`RequestEnvelope` / `ResponseEnvelope`) and inner-RPC (`RpcRequest` / `RpcResponse`) types, both observation-derived (see captures under `docs/captures/`). Runtime-validate anything coming off the wire through `guards.ts`; keep unknown fields as `unknown`, never `any`.
 - `src/transport/manifest.ts` — walks per-browser `NativeMessagingHosts/` directories (Chrome, Chromium, Edge, Brave, Vivaldi, Arc, Firefox) and filters for manifests that list the Strongbox Chrome extension origin `chrome-extension://mnilpkfepdibngheginihjpknnopchbn/`.
 - `src/transport/native-messaging.ts` — uint32-LE length-prefixed UTF-8 JSON framing. Outbound cap 1 MiB, inbound cap ~4 GiB per the spec. `FrameDecoder` is a streaming decoder; feed chunks with `push()`, pull complete messages with `take()`.
 - `src/transport/afproxy.ts` — subprocess manager. Spawns the binary from the chosen manifest with one argv (the Chrome extension origin — we mimic Chrome's launch convention, not Firefox's). Pure transport: knows nothing about crypto or RPC vocabulary. stderr is surfaced only under `--verbose`.
 - `src/crypto/box.ts` — typed wrapper over libsodium's `crypto_box_easy` / `crypto_box_open_easy` (Curve25519 + XSalsa20-Poly1305). Imported via `createRequire` to dodge a broken ESM build in `libsodium-wrappers-sumo` — if that's ever fixed upstream, revert to a plain default import.
-- `src/crypto/identity.ts` — persists the client keypair at `~/Library/Application Support/strongbox-cli/identity.json` with 0600/0700 perms. The expected handshake model is TOFU: first connection prompts the user in Strongbox; subsequent sessions skip it because our public key is persisted on both ends.
+- `src/crypto/identity.ts` — persists the client keypair at `~/Library/Application Support/strongbox-cli/identity.json` with 0600/0700 perms. Strongbox 1.63.1 was observed accepting an unseen client key with no approval prompt, so this is hygiene and future-proofing rather than a protocol requirement.
 - `src/util/log.ts` — stderr-only logger gated by process-wide `setVerbose`. **stdout is reserved for command output**; diagnostics, trace, and warnings all go to stderr. Preserve this so shell pipelines stay clean.
 
 ### Output contract
 
 Subcommands call `emit(value, asJson)`:
+
 - default mode: strings go to stdout raw (with a trailing newline if absent); objects pretty-print as JSON.
 - `--json`: everything pretty-prints as JSON.
 

@@ -1,0 +1,6 @@
+capture_via=strongbox-cli direct (real afproxy, no MitM)
+real=/Applications/Strongbox.app/Contents/MacOS/afproxy
+client_pk=dswP6aY05PLAd343STJTeS4OsFvByZmerFkWvmeIe08=
+real_server_pk=PmWOflLym98HcYM+W0yfA6ErygnJS1hkLvOBpJ8bqXY=
+argc=1
+argv[0]=chrome-extension://mnilpkfepdibngheginihjpknnopchbn/

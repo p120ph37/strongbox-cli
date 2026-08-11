@@ -76,5 +76,5 @@ Everything actually sitting on the wire — handshake shape, RPC vocabulary, fra
 
 ## Related reading
 
-- KeePassXC has a similar architecture for its browser extension (KeePassXC-Browser), which is also well-documented and open source. Studying *that* protocol is useful background because it solves the same problem and has published its design openly. Reading KeePassXC source is fine under our clean-room discipline; reading Strongbox source is not. <https://github.com/keepassxreboot/keepassxc-browser>
+- KeePassXC has a similar architecture for its browser extension (KeePassXC-Browser), which is also well-documented and open source. Studying _that_ protocol is useful background because it solves the same problem and has published its design openly. Reading KeePassXC source is fine under our clean-room discipline; reading Strongbox source is not. <https://github.com/keepassxreboot/keepassxc-browser>
 - The original KeePass 2 file format spec: <https://keepass.info/help/kb/kdbx.html>

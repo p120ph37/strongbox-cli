@@ -51,6 +51,7 @@ The stdio side follows Chrome's / Firefox's standard Native Messaging framing
 - Maximum message size is 1 MB extension→host, 4 GB host→extension.
 
 References:
+
 - <https://developer.chrome.com/docs/extensions/develop/concepts/native-messaging>
 - <https://developer.mozilla.org/en-US/docs/Mozilla/Add-ons/WebExtensions/Native_messaging>
 
@@ -78,12 +79,17 @@ The manifest has the shape:
 
 (Firefox uses `allowed_extensions` with add-on IDs instead of `allowed_origins`.)
 
-**TBD (observe)**: the exact string used for the `name` field. The extension's
-known Chrome Web Store ID is `mnilpkfepdibngheginihjpknnopchbn`.
+The manifest filename is **`com.markmcguill.strongbox.json`** (observed), and
+`path` points at **`/Applications/Strongbox.app/Contents/MacOS/afproxy`**
+(confirmed on disk). We discover this at runtime by reading the manifest. The
+extension's Chrome Web Store ID is `mnilpkfepdibngheginihjpknnopchbn`.
 
-The `path` will point somewhere inside the Strongbox app bundle, probably
-`/Applications/Strongbox.app/Contents/…/afproxy`. We discover this at runtime by
-reading the manifest.
+**Manifest presence tracks the "Enable Chrome & Firefox AutoFill extension"
+master switch** _(observed 2026-08-11)_. Strongbox installs this manifest when
+the setting is on and **removes it when off** — the same switch that stops the
+proxy (§3). So on a client, a missing manifest is the normal, expected signal
+that browser autofill is disabled, not necessarily that Strongbox is absent;
+distinguish the two by checking whether `Strongbox.app` exists.
 
 ### Launch arguments
 
@@ -105,18 +111,38 @@ The known socket path for the Strongbox SSH agent is:
 (Source: <https://strongbox.reamaze.com/kb/ssh-agent/ssh-agent>.)
 
 That is a separate socket — it speaks the OpenSSH agent wire protocol, not this
-RPC protocol. The autofill socket lives in the same group container but under a
-different filename. **TBD (observe)**: exact filename. Candidates to check:
+RPC protocol (see §6).
 
-- `autofill.sock`
-- `afproxy.sock`
-- `browser.sock`
-- something containing a bundle identifier
+The autofill socket is **`F`**, `AF_UNIX`/`SOCK_STREAM`, in the same group
+container:
 
-The socket is `AF_UNIX`, `SOCK_STREAM`. The framing on this side is independent
-of the stdio framing: afproxy has to re-frame whatever it reads from stdin.
-**TBD (observe)** whether the inner framing is the same 4-byte little-endian
-length prefix (simplest implementation) or something else.
+```
+~/Library/Group Containers/group.strongbox.mac.mcguill/F
+```
+
+Identified by interposition (rename `F` to `F.real`, bind a proxy at `F`, forward
+verbatim — the listener keeps the inode). Findings:
+
+- **Inner framing is raw JSON, no length prefix.** afproxy strips the stdio
+  side's uint32-LE prefix; on this hop it writes the bare Hello JSON (113 bytes).
+- **The proxy is bound at app launch**, gated by the "Enable Chrome & Firefox
+  AutoFill extension" master switch (`runBrowserAutoFillProxyServer-Prod-22-Oct-2022`),
+  independent of vault state or per-database autofill. When that switch is off,
+  Strongbox stops listening on `F` and uninstalls the Native Messaging manifest
+  (§2), so a client fails at manifest discovery. The SSH agent (`runSshAgent`) is
+  a separate switch, unaffected.
+
+### 3.1 `F` accepts third-party clients
+
+A non-Strongbox process can speak this protocol directly to `F`: opening it and
+writing a raw-JSON `messageType=0` Hello returns a full response envelope that
+decrypts against our client identity. There is no peer-identity gate.
+
+Not used by this CLI — a correctly-framed write is served fine, but a mis-framed
+one (e.g. with the stdio length prefix) wedges Strongbox's accept loop until
+restart, and the ~100 ms/RPC that direct mode would save is negligible. The stdio
+path via afproxy is the supported surface; direct-to-`F` is documented as
+possible, not chosen.
 
 ## 4. Cryptographic envelope — Crypto Box
 
@@ -185,7 +211,7 @@ clientSecretKey)` on the client side (inverse on the server side).
 - The server's public key was **identical across all 94 captures**. This is
   consistent with a long-lived server keypair (TOFU on the server side).
   Our client can persist its own keypair, transmit it once, and expect to
-  be recognised on subsequent connections without re-prompting.
+  be recognized on subsequent connections without re-prompting.
 - The client's public key rotated across **10 distinct values** in the
   capture set. The browser extension therefore caches its keypair across
   several native-host spawns (likely scoped to popup/service-worker
@@ -232,7 +258,7 @@ enumerated in §5.
 Plaintext for every `messageType` the extension emits was decoded on
 2026-04-20 via a back-to-back encryption MitM native host (see
 `docs/REVERSE_ENGINEERING.md` §"Layer D.1 — MitM" and the capture set at
-`docs/captures/2026-04-20-layerD/`). The table below summarises each
+`docs/captures/2026-04-20-layerD/`). The table below summarizes each
 operation; subsections give the full request/response schema and a
 redacted sample.
 
@@ -243,18 +269,18 @@ deviations are `Hello` (mt=0, has no class name on the wire) and
 `ListGroups` (mt=7, where the operation returns groups but Strongbox
 decodes the request as `CreateEntryRequest`).
 
-| mt | operation                | server-side class           | capture dir                                    |
-| -- | ------------------------ | --------------------------- | ---------------------------------------------- |
-| 0  | Hello                    | *(special — see §4.2)*      | `2026-04-20-layerD/00-mt0-hello/`              |
-| 2  | CredentialsForUrl        | `CredentialsForUrlRequest`  | `2026-04-20-layerD/01-mt2-search-url/`         |
-| 3  | CopyField                | `CopyFieldRequest`          | `2026-04-20-layerD/02-mt3-copy-field/`         |
-| 4  | LockDatabase             | `LockDatabaseRequest`       | `2026-04-20-layerD/03-mt4-lock-db/`            |
-| 5  | UnlockDatabase           | `UnlockDatabaseRequest`     | `2026-04-20-layerD/04-mt5-unlock-db/`          |
-| 6  | CreateEntry              | `CreateEntryRequest`        | `2026-04-20-layerD/05-mt6-create-entry/`       |
-| 7  | ListGroups *(editorial)* | `CreateEntryRequest` (reused) | `2026-04-20-layerD/06-mt7-list-groups/`      |
-| 11 | GeneratePassword         | *(unnamed — accepts any input silently)* | `2026-04-20-layerD/07-mt11-generate-password/` |
-| 12 | GetPasswordStrength      | `handleGetPasswordStrengthRequest` | `2026-04-20-layerD/08-mt12-check-strength/` |
-| 13 | GetNewEntryDefaultsV2    | `GetNewEntryDefaultsRequestV2` | `2026-04-20-layerD/09-mt13-prepare-new-entry/` |
+| mt  | operation                | server-side class                        | capture dir                                    |
+| --- | ------------------------ | ---------------------------------------- | ---------------------------------------------- |
+| 0   | Hello                    | _(special — see §4.2)_                   | `2026-04-20-layerD/00-mt0-hello/`              |
+| 2   | CredentialsForUrl        | `CredentialsForUrlRequest`               | `2026-04-20-layerD/01-mt2-search-url/`         |
+| 3   | CopyField                | `CopyFieldRequest`                       | `2026-04-20-layerD/02-mt3-copy-field/`         |
+| 4   | LockDatabase             | `LockDatabaseRequest`                    | `2026-04-20-layerD/03-mt4-lock-db/`            |
+| 5   | UnlockDatabase           | `UnlockDatabaseRequest`                  | `2026-04-20-layerD/04-mt5-unlock-db/`          |
+| 6   | CreateEntry              | `CreateEntryRequest`                     | `2026-04-20-layerD/05-mt6-create-entry/`       |
+| 7   | ListGroups _(editorial)_ | `CreateEntryRequest` (reused)            | `2026-04-20-layerD/06-mt7-list-groups/`        |
+| 11  | GeneratePassword         | _(unnamed — accepts any input silently)_ | `2026-04-20-layerD/07-mt11-generate-password/` |
+| 12  | GetPasswordStrength      | `handleGetPasswordStrengthRequest`       | `2026-04-20-layerD/08-mt12-check-strength/`    |
+| 13  | GetNewEntryDefaultsV2    | `GetNewEntryDefaultsRequestV2`           | `2026-04-20-layerD/09-mt13-prepare-new-entry/` |
 
 ### 5.0 Probe sweep — slots not seen during normal extension use
 
@@ -266,21 +292,22 @@ every dispatched slot names its expected class via the resulting error.
 The sweep recovered the names listed in the table above and additionally
 mapped the slots not driven by the extension UI:
 
-| mt  | server-side class                | notes                                                 |
-| --- | -------------------------------- | ----------------------------------------------------- |
-| 1   | `SearchRequest`                  | distinct from mt=2 (URL-keyed); generic search; args TBD |
-| 8   | `GetNewEntryDefaultsRequest`     | v1 of mt=13 `GetNewEntryDefaultsRequestV2`            |
-| 9   | *(unnamed — accepts any input)*  | returns `{password, alternatives: string[]}` — a multi-suggestion variant of `GeneratePassword` |
-| 10  | `GetIconRequest`                 | favicon / entry-icon fetch                            |
-| 14  | `GetFavouritesRequest`           | response shape `{results: []}` on empty input          |
-| 15  | `CopyFieldRequest`               | same decode class as mt=3; role difference TBD        |
-| ≥16 | —                                | `errorMessage="Could not convert request to JSON"` — slot not dispatched |
+| mt  | server-side class               | notes                                                                                                                                                                  |
+| --- | ------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1   | `SearchRequest`                 | **schema confirmed** — `{query}`; see §5.1a                                                                                                                            |
+| 8   | `GetNewEntryDefaultsRequest`    | v1 of mt=13 `GetNewEntryDefaultsRequestV2`; likely `{databaseId}`, unconfirmed                                                                                         |
+| 9   | _(unnamed — accepts any input)_ | returns `{password, alternatives: string[]}` — a multi-suggestion variant of `GeneratePassword`                                                                        |
+| 10  | `GetIconRequest`                | favicon / entry-icon fetch; request schema TBD                                                                                                                         |
+| 14  | `GetFavouritesRequest`          | **schema confirmed** — request `{}`, response `{results: Credential[]}`; see §5.12                                                                                     |
+| 15  | `CopyFieldRequest`              | names the same class as mt=3 but **rejects** mt=3's exact field set (`{databaseId,nodeId,explicitTotp,field}`) — needs a different/richer payload; role still unmapped |
+| ≥16 | —                               | `errorMessage="Could not convert request to JSON"` — slot not dispatched                                                                                               |
 
-The probes never supplied a conforming inner payload, so request/response
-schemas for mt = 1, 8, 10, 14, 15 are still TBD. mt = 9 and mt = 11
-silently accept any payload and so cannot be named via this method.
-All class names come from Strongbox's runtime error strings; the
-Strongbox source tree was not read.
+Since this sweep, mt = 1 and mt = 14 have had their full schemas recovered
+(see §5.1a and §5.12) — mt=1's `query` field by guess-and-check against the
+decode error, mt=14 by driving it directly. Still TBD: mt = 8, 10, 15. mt = 9
+and mt = 11 silently accept any payload and so cannot be named via this method.
+All class names come from Strongbox's runtime error strings; the Strongbox
+source tree was not read.
 
 > Caveat: the **mt=4 / mt=5 ordering** (Lock = 4, Unlock = 5) was
 > originally inverted in this document and in the type system. The
@@ -298,50 +325,146 @@ Response:
 ```jsonc
 {
   "databases": [
-    { "uuid": "…", "nickName": "vault-a",
-      "locked": true,  "autoFillEnabled": true, "includeFavIconForNewEntries": true },
-    { "uuid": "…", "nickName": "test",
-      "locked": false, "autoFillEnabled": true, "includeFavIconForNewEntries": true }
+    {
+      "uuid": "…",
+      "nickName": "vault-a",
+      "locked": true,
+      "autoFillEnabled": true,
+      "includeFavIconForNewEntries": true,
+    },
+    {
+      "uuid": "…",
+      "nickName": "test",
+      "locked": false,
+      "autoFillEnabled": true,
+      "includeFavIconForNewEntries": true,
+    },
   ],
   "serverVersionInfo": "1.63.1",
   "serverSettings": {
-    "colorBlindPalette":  false,
-    "supportsCreateNew":  true,
-    "markdownNotes":      true,
-    "colorizePasswords":  true
-  }
+    "colorBlindPalette": false,
+    "supportsCreateNew": true,
+    "markdownNotes": true,
+    "colorizePasswords": true,
+  },
 }
 ```
 
+**`autoFillEnabled` reflects the per-database "Enable AutoFill for this
+Database" setting, and it is a hard gate on entry visibility** _(observed
+2026-08-11)_. A database with `autoFillEnabled: false` is **still listed here**
+(not omitted, not shown empty — the summary carries no entry count), but **none
+of its entries appear in any entry-query path**: mt=1 search, mt=2
+CredentialsForUrl, and mt=14 favourites all exclude them. This is strictly
+broader than the per-entry "Do not suggest in autofill" of §5.2, which filters
+mt=2 only. `locked` is independent — the observed DB was `locked:false,
+autoFillEnabled:false`.
+
+Consequence for a client: a database can be present in this list yet have
+zero reachable entries. `list` (which surfaces this array) can therefore show a
+database whose entries `search`/`get`/`totp` cannot find — inherent to the
+afproxy interface, which only exposes autofill-enabled databases' entries.
+
+### 5.1a `mt = 1` — Search _(confirmed 2026-08-10)_
+
+Generic full-text search, distinct from the URL-keyed mt=2. The extension UI
+never drives it, so no MitM capture exists; the schema was recovered by
+issuing requests from this project's own client against the real server and,
+for the field name, guess-and-check against the decode error (see
+`docs/captures/2026-08-10-direct/`).
+
+Request: `{ "query": "...", "skip": 0, "take": 200 }`. Only `query` is
+required — Strongbox's `SearchRequest` decodes from that alone. `query: ""`
+matches everything.
+
+Response: `{ "results": Credential[] }` — the `Credential` record of §5.6. No
+`unlockedDatabaseCount` here, unlike mt=2.
+
+Behavior worth knowing:
+
+- **`take` is clamped to ~64 server-side** (`take: 5000` still returns 64), so
+  the full result set is only reachable by **paging on `skip`**: advance `skip`
+  by the count returned, stop on the first empty page (verified across a
+  244-entry vault, no duplicates). A single large `take` silently truncates.
+- Matching is full-text over `title`, `username`, `notes`, and **custom-field
+  values** — so it can hit on secret material — but **not** `uuid`. UUID
+  resolution therefore requires enumerating (`query: ""` + `skip` paging).
+- Only unlocked, autofill-enabled databases contribute entries.
+
 ### 5.2 `mt = 2` — CredentialsForUrl
 
-Request: `{ "url": "...", "skip": 0, "take": 9 }` (observed pagination
-values; larger `take` untested).
+Request: `{ "url": "...", "skip": 0, "take": 9 }`. The extension always
+sends `take: 9`; larger values are untested. `skip` genuinely paginates —
+`11-mt2-results-paginated/` issues `skip: 2` against a two-result match
+and gets `results: []` back.
 
-Response: `{ "results": [...], "unlockedDatabaseCount": <int> }`. Every
-capture we have returned `results: []`; the element type is therefore
-**unconfirmed** — typed as `unknown[]` in `src/protocol/messages.ts`
-until a non-empty search is captured. Best guess is `Credential[]` (see
-§5.6).
+Response: `{ "results": [...], "unlockedDatabaseCount": <int> }`.
+
+`results` is **confirmed `Credential[]`** (see §5.6) as of the non-empty
+captures landed on 2026-08-10: `10-mt2-results-two/` (two matches) and
+`12-mt2-results-three/` (three). Field-for-field the records match §5.6
+with no drift across all 41 credential records in the capture set.
+
+`unlockedDatabaseCount` counts **unlocked databases, not results** — it
+reads `1` alongside both empty and non-empty `results`, and `0` when
+every database is locked. Do not use it as a result count.
+
+Two behaviors worth relying on / not relying on:
+
+- **Matching is host-scoped, not path-scoped.** Queries for `/login`,
+  `/secure`, and `/` on the same host all return the same entries, and an
+  entry whose stored URL is `…/blah` matches a query for `/`. Callers
+  should not expect the server to narrow by path.
+- **Result order is not stable.** The same two entries came back as
+  `[Untitled, The Internet]` and as `[The Internet, Untitled]` across
+  captures minutes apart, with no intervening edit. Never address a
+  result by index; match on `uuid`.
+
+**The per-entry "Do not suggest in autofill" setting filters mt=2 only**
+_(observed 2026-08-11)_. Enabling it removes the entry from mt=2 results while
+it stays visible via mt=1 search and mt=14 favourites. It is not exposed in the
+`Credential` record — its only observable effect is absence from mt=2 — so a
+client cannot detect it. For this CLI that split is correct: `url` (mt=2)
+inherits the suppression; the explicit `search`/`get`/`totp`/`copy` (mt=1)
+lookups still reach the entry.
 
 ### 5.3 `mt = 3` — CopyField
 
-The extension asks the server to inject a specific field of a specific
-entry via the OS paste/keyboard path. The response only confirms success;
-the value is not returned.
+Writes one field of an entry to the **OS clipboard** (confirmed by canary
+read-back — not keystroke injection, no focus-stealing). The response only
+confirms success; the value goes to the clipboard, not back over the wire.
 
 Request:
 
 ```jsonc
 {
-  "databaseId":   "…",   // UUID of an unlocked database
-  "nodeId":       "…",   // UUID of the entry within that database
+  "databaseId": "…", // UUID of an unlocked database
+  "nodeId": "…", // UUID of the entry within that database
   "explicitTotp": false,
-  "field":        2      // integer selector; 2 = password (only value observed)
+  "field": 1, // integer selector; see the enum below
 }
 ```
 
-Response: `{ "success": true }`.
+Response: `{ "success": true }`. An unknown `field` returns `{ "success": false }`.
+
+`field` enum, recovered by clipboard read-back against a known entry:
+
+| field | copies                                            |
+| ----- | ------------------------------------------------- |
+| 0     | username                                          |
+| 1     | password                                          |
+| 2     | **TOTP** — the current code, computed server-side |
+| ≥3    | rejected (`success: false`)                       |
+
+Notes:
+
+- For `field: 2`, Strongbox computes the live code server-side and copies
+  _that_ (not the secret); it matched our RFC 6238 computation to the digit.
+- **`explicitTotp: true` means "user explicitly requested the code"** and
+  overrides Strongbox's per-database `autoFillCopyTotp` preference. With that
+  preference off, `field: 2` copies only when `explicitTotp: true` (`false`
+  returns `success: true` but writes nothing). So a client wanting the code
+  unconditionally (as `copy --field totp` does) must send `true`.
 
 ### 5.4 `mt = 4` — LockDatabase &nbsp;·&nbsp; `mt = 5` — UnlockDatabase
 
@@ -362,12 +485,12 @@ Request:
 ```jsonc
 {
   "databaseId": "…",
-  "groupId":    "…",                      // from mt=7 ListGroups
-  "icon":       "data:image/png;base64,…", // PNG data URL; ~5 KiB typical
-  "title":      "…",
-  "username":   "…",
-  "password":   "…",
-  "url":        "…"
+  "groupId": "…", // from mt=7 ListGroups
+  "icon": "data:image/png;base64,…", // PNG data URL; ~5 KiB typical
+  "title": "…",
+  "username": "…",
+  "password": "…",
+  "url": "…",
 }
 ```
 
@@ -378,37 +501,111 @@ Response: `{ "uuid": "…", "credential": <Credential> }` where
 
 ```jsonc
 {
-  "uuid":                "…",
-  "databaseId":          "…",
-  "databaseName":        "test",
-  "title":               "…",
-  "username":            "…",
-  "password":            "…",
-  "url":                 "…",
-  "totp":                "",               // empty when unset
-  "notes":               "",
-  "favourite":           false,
-  "tags":                [],
-  "customFields":        [],               // element shape unconfirmed
-  "attachmentFileNames": [],
-  "icon":                "data:image/png;base64,…",
-  "modified":            "Today at 5:17 PM" // human-formatted; NOT ISO 8601
+  "uuid": "…",
+  "databaseId": "…",
+  "databaseName": "test",
+  "title": "…",
+  "username": "…",
+  "password": "…",
+  "url": "…",
+  "totp": "", // otpauth:// URI, or "" when unset
+  "notes": "",
+  "favourite": false,
+  "tags": [],
+  "customFields": [
+    // {key,value,concealable}; see below
+    { "key": "cf-first", "value": "…", "concealable": false },
+  ],
+  "attachmentFileNames": [], // FILTERED — see §5.6 filters
+  "icon": "data:image/png;base64,…",
+  "modified": "Today at 5:17 PM", // locale-formatted; NOT ISO 8601
 }
 ```
 
-### 5.7 `mt = 7` — ListGroups *(editorial name)*
+Confirmed against all 41 credential records in the capture set (mt=2
+results and the mt=6 response). Notes on the fields that surprise:
+
+- **`totp` is an `otpauth://` URI, not a live code.** Observed form:
+  `otpauth://totp/<label>?secret=…&algorithm=SHA1&digits=6&period=30`.
+  The server hands over the shared secret and expects the client to
+  compute the digits. This is why a `totp` command needs no messageType
+  of its own — mt=2 already carries everything.
+  - The URI is **re-synthesized, not byte-preserved**: recognized OTP params
+    (`secret`/`algorithm`/`digits`/`period`/`issuer`/`encoder`/account)
+    round-trip, but Strongbox normalizes order/defaults and drops unknown
+    params. Non-default values survive; exact-string fidelity does not.
+  - **Steam Guard** is carried as `…&encoder=steam&digits=5` (both a pasted
+    Steam URL and Strongbox's native Steam mode). Clients must special-case
+    `encoder=steam`: 5 symbols base-26 over `23456789BCDFGHJKMNPQRTVWXY`, not
+    decimal (`src/util/totp.ts`, verified against Strongbox's own code).
+- **`icon` is a `data:image/png;base64,…` URI running to several KB**
+  (5,622 chars on one observed record). It dominates the byte size of a
+  response. Don't inline it in default CLI output.
+- **`modified` is locale-formatted for display**, and switches between
+  relative and absolute forms — both `"Today at 5:17 PM"` and
+  `"Apr 17, 2026 at 1:45 PM"` were observed in the same capture set.
+  It is not machine-parseable; treat it as an opaque display string.
+- **`customFields` elements are `{ key, value, concealable }`** _(confirmed
+  2026-08-10)_. `concealable` is a **display hint only** — Strongbox marks a
+  field sensitive so a UI can mask it, but **the `value` is still sent in the
+  clear**. Do not read `concealable: true` as "value withheld"; nothing is
+  withheld. `tags` and `attachmentFileNames` are confirmed `string[]`.
+  - `concealable` is exactly the KDBX per-string **`Protected`
+    (memory-protection) attribute** — confirmed 2026-08-11 by matching the wire
+    flag field-for-field against the raw vault. It carries no access control,
+    only that memory-protection bit.
+  - **Structured entry types are not modelled on the wire.** A Strongbox
+    "Credit Card" entry arrives as an ordinary `Credential` whose card data is
+    plain custom fields (`CardNumber`, `CVV`, `PIN`, `ExpiryDate`, …), all
+    transmitted; the card number is also copied into the standard `password`
+    field (and the cardholder into `username`). Nothing is filtered the way SSH
+    material is, and no marker identifies the entry as a card — a client can
+    only infer the type from the conventional key names.
+
+#### The server serves a _filtered_ view, not the raw entry
+
+_(Confirmed 2026-08-10 by diffing the wire against the KDBX file for one
+entry.)_ Four fields are curated by Strongbox before transmission — a client
+that treats them as the entry's full contents will be wrong:
+
+| field                 | dropped from the wire view                                       |
+| --------------------- | ---------------------------------------------------------------- |
+| `attachmentFileNames` | SSH-agent material — `id_ed25519`, `KeeAgent.settings`           |
+| `customFields`        | reserved 2FA/meta keys — `otp`, `TimeOtp-Secret-Base32`, `Email` |
+| `tags`                | the `Favorite` tag (surfaced instead as `favourite: bool`)       |
+| mt=7 `groups`         | the Recycle Bin and its descendants                              |
+
+Consequences: **you cannot discover an entry's SSH key over this protocol**
+(§6.2); the `TimeOtp-Secret-Base32` custom field is consumed to synthesize the
+`totp` URI rather than passed through; and "searchable group" (which excludes
+the Recycle Bin) is an app-wide visibility rule, the same one the SSH agent
+applies (§6.1).
+
+Adding a TOTP writes both the native `TimeOtp-Secret-Base32` and a
+KeePassXC-style `otp` field (a full `otpauth://` URI) into the KDBX; both are
+filtered from the wire (a Steam entry stores only `otp`, which the native format
+can't encode). Strongbox's 2FA-export app settings had no observable effect on
+either the stored `otp` field or the wire.
+
+**`Credential.totp` is synthesized from the stored secret and was populated in
+every state tested** — it is the single, reliable TOTP signal on the wire, since
+the raw secret fields are filtered.
+
+### 5.7 `mt = 7` — ListGroups _(editorial name)_
 
 Request: `{ "databaseId": "…" }`.
 Response: `{ "groups": [ { "uuid": "…", "title": "…" }, … ] }`.
 
-Strongbox decodes this request through the **same** `CreateEntryRequest`
-class as mt=6 — the probe sweep returned `"Can't decode CreateEntryRequest from message JSON"`
-for mt=7 too. The class is reused because both ops only need a
-`databaseId` field, but the operation a mt=7 dispatch performs is to
-*list available groups*, which is why this document uses the editorial
-name `ListGroups` rather than `CreateEntry`. The reuse means a mt=7
-request with the *full* mt=6 field set would also decode and dispatch;
-behaviour in that case is unobserved.
+**The hierarchy is flattened** _(confirmed 2026-08-10)_. A nested group comes
+back with `title` set to its full `/`-joined path — a vault with `Parent`
+containing `Child` yields `"Parent"` and `"Parent/Child"` as sibling entries,
+with no parent reference. The root group appears as `"Database"`. The Recycle
+Bin and its descendants are omitted (see the §5.6 filter table). A group title
+containing a literal `/` is therefore ambiguous against this encoding.
+
+Strongbox decodes this request through the **same** `CreateEntryRequest` class
+as mt=6 (both only need `databaseId`), so this doc uses the editorial name
+`ListGroups` to reflect what the op does rather than its decode target.
 
 ### 5.8 `mt = 11` — GeneratePassword
 
@@ -416,11 +613,21 @@ Request: `{}`. Response:
 
 ```jsonc
 {
-  "password":     { "password": "…", "strength": { "entropy": 84.3, "category": "Strong", "summaryString": "Strong (15 / 84.3 bits / >100m years)" } },
+  "password": {
+    "password": "…",
+    "strength": {
+      "entropy": 84.3,
+      "category": "Strong",
+      "summaryString": "Strong (15 / 84.3 bits / >100m years)",
+    },
+  },
   "alternatives": [
-    { "password": "…", "strength": { "entropy": 88.7, "category": "Strong", "summaryString": "…" } }
+    {
+      "password": "…",
+      "strength": { "entropy": 88.7, "category": "Strong", "summaryString": "…" },
+    },
     /* …N more alternates; exact N not established… */
-  ]
+  ],
 }
 ```
 
@@ -444,15 +651,28 @@ Request: `{ "databaseId": "…" }`. Response:
 ```jsonc
 {
   "mostPopularUsernames": ["username", "tomsmith"],
-  "username":             "username",
+  "username": "username",
   "password": {
     "password": "…",
-    "strength": { "entropy": 93.3, "category": "Strong", "summaryString": "…" }
-  }
+    "strength": { "entropy": 93.3, "category": "Strong", "summaryString": "…" },
+  },
 }
 ```
 
-### 5.11 Typed projection
+### 5.11 `mt = 14` — GetFavourites _(confirmed 2026-08-10)_
+
+Returns the favourited entries. Not driven by the extension UI; captured
+directly from this project's client (`docs/captures/2026-08-10-direct/`).
+
+Request: `{}` (a literal empty object — Strongbox's `GetFavouritesRequest`
+decodes from it).
+
+Response: `{ "results": Credential[] }` — the same record and the same
+filtered view as mt=1/mt=2 (see §5.6). As with mt=1 there is no
+`unlockedDatabaseCount`. Membership tracks the `Favorite` tag that §5.6 shows
+being lifted out of `tags` into the `favourite` boolean.
+
+### 5.12 Typed projection
 
 `src/protocol/messages.ts` mirrors this §5 exactly: one
 `<Op>Request` / `<Op>Response` pair per messageType, a shared
@@ -466,21 +686,82 @@ lets callers do `rpc<K>(mt, request)` with a correctly-narrowed return.
 The SSH agent interface described at
 <https://strongbox.reamaze.com/kb/ssh-agent/ssh-agent> is **unrelated** to this
 protocol. It speaks the standard OpenSSH agent wire format (RFC draft
-`draft-miller-ssh-agent`) on a different Unix socket
-(`…/group.strongbox.mac.mcguill/agent.sock`). It's useful if you need an SSH
-key, but it doesn't give you password lookup. This CLI might grow a separate
-`ssh` subcommand that fronts that socket, but the code is completely distinct.
+`draft-miller-ssh-agent`) on a different Unix socket. There is no
+Strongbox-specific protocol involved — any OpenSSH-compatible client works
+unmodified. It carries keys only; it will not do password lookup.
+
+Documented here for completeness. Fronting this socket is **out of scope** for
+this CLI: an SSH client that already speaks the agent protocol needs nothing
+from us.
+
+### 6.1 How the keys are stored
+
+SSH keys live inside ordinary entries, using the **KeeAgent** convention from
+the KeePass ecosystem rather than anything Strongbox invented — two attachments
+on the entry:
+
+| attachment          | contents                                  |
+| ------------------- | ----------------------------------------- |
+| `id_ed25519`        | the private key, standard OpenSSH format  |
+| `KeeAgent.settings` | XML sidecar marking the key agent-enabled |
+
+Per the KB, Strongbox offers a key only if it uses RSA or ED25519, is stored in
+standard OpenSSH format, has _"Enabled for SSH Agent"_ turned on for that entry,
+and sits in a **searchable group** — explicitly _not_ the Recycle Bin. That last
+condition is the same visibility rule §5.7 shows mt=7 applying when it omits the
+Recycle Bin from the group list, so "searchable group" is an app-wide concept
+rather than an autofill-specific filter.
+
+### 6.2 The autofill protocol hides these attachments
+
+An entry holding an SSH key reports only its _non-key_ attachments over
+mt=1/mt=2 — `KeeAgent.settings` and `id_ed25519` are omitted from
+`attachmentFileNames` (§5.6 filter table). So **you cannot discover an entry's
+SSH key through this protocol at all**; the attachment list is a filtered view,
+not an inventory.
+
+### 6.3 Reaching the agent
+
+The feature is off by default and is enabled app-wide at _App Preferences → SSH
+Agent_ (Pro, macOS, KeePass 2.x databases only). The per-entry
+_"Enabled for SSH Agent"_ toggle does **not** switch it on by itself — with the
+app-level setting off, no socket is created.
+
+Once enabled, the socket appears at:
+
+```
+~/Library/Group Containers/group.strongbox.mac.mcguill/agent.sock
+```
+
+Clients reach it the ordinary way. The path contains spaces, so it must be
+quoted; `ssh` expands the `~` inside the quotes:
+
+```sshconfig
+Host *
+  IdentityAgent "~/Library/Group Containers/group.strongbox.mac.mcguill/agent.sock"
+```
+
+`IdentityAgent` replaces the _agent_ for matching hosts; `IdentityFile` is
+unaffected, so on-disk keys keep working. Git ignores `IdentityAgent` entirely,
+so commit signing needs the environment variable instead:
+
+```sh
+export SSH_AUTH_SOCK="$HOME/Library/Group Containers/group.strongbox.mac.mcguill/agent.sock"
+```
+
+Operational caveat: the agent only serves keys from **unlocked** databases. When
+the database locks, `ssh-add -l` reports no identities and any SSH attempt
+silently loses that key.
 
 ## 7. What this buys us
 
-If — and it's a real *if* — the protocol turns out to be approximately as above,
-the CLI becomes a thin layer:
+The protocol above is implemented, and the CLI is a thin layer over it:
 
 1. Locate the Native Messaging manifest, read `path` to find `afproxy`.
 2. `Bun.spawn` afproxy with the right argv and piped stdio.
 3. Generate/persist a Curve25519 keypair for ourselves.
-4. Run the handshake. On first run, the user sees a Strongbox prompt.
-5. For each CLI invocation, open a session, send one RPC, print the result.
+4. Exchange keys via the `messageType=0` Hello (no separate handshake, no
+   approval prompt on current Strongbox).
+5. Per invocation: open a session, send one RPC, print the result.
 
-Steps 1–3 are doable today from the public information. Steps 4–5 need wire
-observation. See `docs/REVERSE_ENGINEERING.md` for the actual procedure.
+See `docs/REVERSE_ENGINEERING.md` for the observation procedure that got us here.
