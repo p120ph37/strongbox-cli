@@ -9,7 +9,6 @@
  *   5  — authentication / handshake failure
  *   6  — transport failure (socket, stdio)
  *   7  — protocol violation (unexpected message shape)
- *   10 — unimplemented (stub / placeholder command)
  *   1  — anything else
  */
 export abstract class StrongboxError extends Error {
@@ -45,12 +44,4 @@ export class TransportError extends StrongboxError {
 export class ProtocolError extends StrongboxError {
   readonly code = 'protocol-error';
   readonly exitCode = 7;
-}
-
-export class UnimplementedError extends StrongboxError {
-  readonly code = 'unimplemented';
-  readonly exitCode = 10;
-  constructor(feature: string) {
-    super(`not yet implemented: ${feature}`);
-  }
 }
