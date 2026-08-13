@@ -61,11 +61,18 @@ strongbox-cli search [query]                 # full-text search (no query lists 
 strongbox-cli url <url>                       # credentials for a page URL
 strongbox-cli get <ref> [--field <name>]      # one entry by UUID or title
 strongbox-cli get <ref> --reveal              # ...with all secret fields shown
+strongbox-cli get <ref> --database <db>        # ...restricted to one vault
 strongbox-cli totp <ref>                      # current TOTP code (incl. Steam)
 strongbox-cli copy <ref> [--field <name>]     # copy a field to the clipboard
 strongbox-cli add <title> [...]               # create an entry
+strongbox-cli unlock <db>                     # prompt for a vault's password
+strongbox-cli lock <db>                       # lock a vault
 strongbox-cli diagnose                        # health-check the integration
 ```
+
+`search`, `get`, `totp`, and `copy` take `--database <nickname|uuid>` to restrict the lookup to one vault. Because a locked vault contributes no entries to any query, naming one is an error (exit 4, `database … is locked`) rather than a silent no-match.
+
+Locked vaults can only be opened by Strongbox itself, which owns the master-password / biometric prompt: `unlock <db>` asks it to raise that prompt and blocks until you answer — exit 0 once unlocked, exit 4 if you cancel. `get --database <db> --unlock` does the same inline, then runs the lookup. Nothing about your master password ever passes through this CLI.
 
 By default `get` hides secret fields. `get <ref> --reveal` prints the full record (password, TOTP URI, notes, custom-field values); `get <ref> --field <name>` prints one value — `password`, `notes`, a custom-field key, or `totp` (live code), `totp-uri`, `totp-secret` (e.g. for `oathtool`). The entry icon (a multi-KB data URI) is omitted from record views unless you pass `--icon`. `--json` gives structured output. Editing and deleting entries are not supported — the protocol has no update or delete operation.
 

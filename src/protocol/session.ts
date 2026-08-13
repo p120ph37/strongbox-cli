@@ -84,10 +84,17 @@ export class Session {
     return new Session(identity, manifest, peerPublicKey, hello);
   }
 
-  /** Send an encrypted RPC and await the decrypted, shape-checked response. */
+  /**
+   * Send an encrypted RPC and await the decrypted, shape-checked response.
+   *
+   * `timeoutMs` overrides the default deadline — needed for the ops that block
+   * on a user-facing Strongbox prompt (mt=5 Unlock) rather than answering
+   * immediately.
+   */
   async rpc<K extends MessageTypeValue>(
     messageType: K,
     request: RpcRequestFor<K>,
+    timeoutMs: number = RPC_TIMEOUT_MS,
   ): Promise<RpcResponseFor<K>> {
     if (messageType === MessageType.Hello) {
       return this.hello as RpcResponseFor<K>;
@@ -101,12 +108,16 @@ export class Session {
       senderSecretKey: this.identity.keyPair.secretKey,
     });
 
-    const res = await roundtrip(this.manifest, {
-      clientPublicKey: await toBase64(this.identity.keyPair.publicKey),
-      nonce: await toBase64(nonce),
-      message: await toBase64(ciphertext),
-      messageType,
-    });
+    const res = await roundtrip(
+      this.manifest,
+      {
+        clientPublicKey: await toBase64(this.identity.keyPair.publicKey),
+        nonce: await toBase64(nonce),
+        message: await toBase64(ciphertext),
+        messageType,
+      },
+      timeoutMs,
+    );
     if (!res.success) {
       throw new ProtocolError(res.errorMessage || `Strongbox rejected messageType ${messageType}`);
     }
@@ -136,6 +147,7 @@ async function readManifest(path: string): Promise<NativeMessagingManifest> {
 async function roundtrip(
   manifest: NativeMessagingManifest,
   request: RequestEnvelope,
+  timeoutMs: number = RPC_TIMEOUT_MS,
 ): Promise<ResponseEnvelope> {
   let proc: Afproxy;
   try {
@@ -146,7 +158,7 @@ async function roundtrip(
     );
   }
   try {
-    const raw = await withTimeout(proc.roundtrip(request), RPC_TIMEOUT_MS);
+    const raw = await withTimeout(proc.roundtrip(request), timeoutMs);
     if (!isResponseEnvelope(raw)) {
       throw new ProtocolError(`malformed response envelope: ${JSON.stringify(raw).slice(0, 200)}`);
     }

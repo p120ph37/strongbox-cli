@@ -1,10 +1,18 @@
 import { Command } from 'commander';
-import { applyGlobalOpts, emit, resolveEntry, withSession, type GlobalOpts } from './_shared.ts';
+import {
+  applyGlobalOpts,
+  emit,
+  resolveEntry,
+  scopeDatabase,
+  withSession,
+  type GlobalOpts,
+} from './_shared.ts';
 import { MessageType } from '../protocol/messages.ts';
 import { UserError } from '../util/errors.ts';
 
 interface CopyOpts {
   field?: string;
+  database?: string;
 }
 
 /**
@@ -20,6 +28,7 @@ export function registerCopyCommand(program: Command): void {
       'copy an entry field to the OS clipboard via Strongbox (username, password, or totp)',
     )
     .option('--field <name>', 'field to copy: username, password, or totp', 'password')
+    .option('--database <ref>', 'search only this database; fails if it is locked')
     .action(async (ref: string, opts: CopyOpts) => {
       const parent = program.opts<GlobalOpts>();
       applyGlobalOpts(parent);
@@ -31,7 +40,8 @@ export function registerCopyCommand(program: Command): void {
       }
 
       const message = await withSession(async (s) => {
-        const entry = await resolveEntry(s, ref);
+        const db = await scopeDatabase(s, opts.database);
+        const entry = await resolveEntry(s, ref, db?.uuid);
         if (field === 'totp' && !entry.totp) {
           throw new UserError(`entry "${entry.title}" has no TOTP configured`);
         }

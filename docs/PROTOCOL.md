@@ -477,6 +477,29 @@ probe sweep (§5.0). Unlocking a locked database triggers the Strongbox
 UI to prompt for the master password; the native host doesn't return
 until that flow resolves.
 
+**mt=5's ack reports the prompt's outcome** _(observed 2026-08-13, Strongbox
+1.64.2, driven from this CLI's `unlock` command — both branches run
+back-to-back against the same vault)_:
+
+| user action at the prompt | ack                 | resulting state  |
+| ------------------------- | ------------------- | ---------------- |
+| dismissed the prompt      | `{"success":false}` | stays `locked`   |
+| entered the master password | `{"success":true}` | `locked: false` |
+
+So a cancelled prompt still gets a normal, prompt reply — mt=5 does not hang,
+and a client can await it with no special case for cancellation (the whole
+cancelled round-trip took ~3 s wall clock, most of it process spawns). The ack
+is a **trustworthy verdict**: `success` discriminates, and no read-back of the
+Hello database list is needed to tell an unlock from a cancel.
+
+mt=4 Lock acks `{"success":true}` on a normal lock (same session). Its
+`success:false` branch is unobserved — locking has no user-facing prompt to
+decline.
+
+Note the Hello response cached at session open is a **snapshot**: its
+`databases[].locked` flags are stale after any mt=4/mt=5 in the same process.
+That is why the outcome is read from the ack and not from Hello.
+
 ### 5.5 `mt = 6` — CreateEntry
 
 Request:

@@ -9,6 +9,7 @@ import { registerUrlCommand } from './commands/url.ts';
 import { registerTotpCommand } from './commands/totp.ts';
 import { registerCopyCommand } from './commands/copy.ts';
 import { registerAddCommand } from './commands/add.ts';
+import { registerLockCommands } from './commands/lock.ts';
 import { StrongboxError } from './util/errors.ts';
 import pkg from '../package.json' with { type: 'json' };
 
@@ -30,6 +31,7 @@ registerUrlCommand(program);
 registerTotpCommand(program);
 registerCopyCommand(program);
 registerAddCommand(program);
+registerLockCommands(program);
 
 try {
   await program.parseAsync(process.argv);

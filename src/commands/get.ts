@@ -5,6 +5,7 @@ import {
   fullView,
   publicView,
   resolveEntry,
+  scopeDatabase,
   withSession,
   type GlobalOpts,
 } from './_shared.ts';
@@ -16,6 +17,8 @@ interface GetOpts {
   field?: string;
   reveal?: boolean;
   icon?: boolean;
+  database?: string;
+  unlock?: boolean;
 }
 
 /** Named built-in fields; anything else is looked up as a custom-field key. */
@@ -67,12 +70,30 @@ export function registerGetCommand(program: Command): void {
       'print only the named field: password, username, url, title, uuid, notes, ' +
         'icon, totp (current code), totp-uri, totp-secret, or a custom-field key',
     )
-    .option('--reveal', 'print the full record including secrets (password, TOTP URI, notes, custom values)')
-    .option('--icon', 'include the icon (a multi-KB data URI, omitted by default) in the record view')
+    .option(
+      '--reveal',
+      'print the full record including secrets (password, TOTP URI, notes, custom values)',
+    )
+    .option(
+      '--icon',
+      'include the icon (a multi-KB data URI, omitted by default) in the record view',
+    )
+    .option(
+      '--database <ref>',
+      'search only this database (nickname or UUID); fails if it is locked, rather than ' +
+        'reporting no match',
+    )
+    .option('--unlock', 'if --database is locked, raise Strongbox’s unlock prompt and wait for it')
     .action(async (ref: string, opts: GetOpts) => {
       const parent = program.opts<GlobalOpts>();
       applyGlobalOpts(parent);
-      const entry = await withSession((s) => resolveEntry(s, ref));
+      if (opts.unlock && opts.database === undefined) {
+        throw new UserError('--unlock needs --database (there is no vault to unlock otherwise)');
+      }
+      const entry = await withSession(async (s) => {
+        const db = await scopeDatabase(s, opts.database, opts.unlock);
+        return resolveEntry(s, ref, db?.uuid);
+      });
 
       // A named field is a specific request — always the full value.
       if (opts.field) {

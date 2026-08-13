@@ -31,6 +31,22 @@ Stable versions (e.g. `v1.2.0`) publish to npm `@latest`. Pre-release versions
   Values are shown in full; nothing is truncated.
 - `get --icon` includes the entry icon (a multi-KB `data:` URI) in the record
   view, which otherwise omits it. `get --field icon` fetches it alone.
+- `--database <nickname|uuid>` on `search`, `get`, `totp`, and `copy` restricts
+  the lookup to one database, which also disambiguates a title shared across
+  vaults. A locked target exits 4 ("database … is locked") instead of reporting
+  no match — locked databases contribute no entries to any query, so the two
+  were otherwise indistinguishable.
+- `unlock <database>` and `lock <database>` commands (mt=5 / mt=4). `unlock`
+  raises Strongbox's own master-password / biometric prompt and blocks until it
+  is answered: exit 0 once the vault is unlocked, exit 4 if it is cancelled.
+  The outcome comes from the mt=5 ack, whose `success` is now confirmed to
+  discriminate a completed unlock from a cancelled prompt (PROTOCOL.md §5.4).
+- `get --database <db> --unlock` runs that prompt inline before the lookup.
+
+### Changed
+
+- `add --database` reports a locked target as exit 4 rather than exit 2 (it
+  shares the database-resolution helper with `get`).
 
 ## [v1.0.0] - 2026-08-11
 

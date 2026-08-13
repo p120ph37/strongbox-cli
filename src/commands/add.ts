@@ -1,6 +1,13 @@
 import { Command } from 'commander';
-import { applyGlobalOpts, emit, publicView, withSession, type GlobalOpts } from './_shared.ts';
-import { MessageType, type DatabaseSummary } from '../protocol/messages.ts';
+import {
+  applyGlobalOpts,
+  emit,
+  publicView,
+  resolveDatabase,
+  withSession,
+  type GlobalOpts,
+} from './_shared.ts';
+import { MessageType } from '../protocol/messages.ts';
 import type { Session } from '../protocol/session.ts';
 import { UserError } from '../util/errors.ts';
 
@@ -12,34 +19,6 @@ interface AddOpts {
   password?: string;
   passwordStdin?: boolean;
   generate?: boolean;
-}
-
-/**
- * Pick the target database. Only unlocked databases can be written; a ref
- * matches nickname or UUID. With no ref, the sole unlocked database is used.
- */
-function resolveDatabase(
-  dbs: readonly DatabaseSummary[],
-  ref: string | undefined,
-): DatabaseSummary {
-  const unlocked = dbs.filter((d) => !d.locked);
-  if (ref) {
-    const m = unlocked.find(
-      (d) => d.nickName === ref || d.uuid.toLowerCase() === ref.toLowerCase(),
-    );
-    if (m) return m;
-    const locked = dbs.find(
-      (d) => d.nickName === ref || d.uuid.toLowerCase() === ref.toLowerCase(),
-    );
-    throw new UserError(
-      locked ? `database "${ref}" is locked — unlock it first` : `no database matched "${ref}"`,
-    );
-  }
-  if (unlocked.length === 1) return unlocked[0]!;
-  if (unlocked.length === 0) throw new UserError('no unlocked database to add to');
-  throw new UserError(
-    `multiple unlocked databases — pass --database (${unlocked.map((d) => d.nickName).join(', ')})`,
-  );
 }
 
 /** Resolve a group ref (exact title or `/`-joined path) to its UUID; default to the root group. */

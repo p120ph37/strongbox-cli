@@ -4,9 +4,9 @@
  */
 
 import { Session } from '../protocol/session.ts';
-import { MessageType, type Credential } from '../protocol/messages.ts';
-import { setVerbose } from '../util/log.ts';
-import { UserError } from '../util/errors.ts';
+import { MessageType, type Credential, type DatabaseSummary } from '../protocol/messages.ts';
+import { setVerbose, trace } from '../util/log.ts';
+import { NotRunningError, UserError } from '../util/errors.ts';
 
 export interface GlobalOpts {
   json?: boolean;
@@ -79,17 +79,117 @@ function matchRef(entries: readonly Credential[], ref: string): Credential | und
  * fetch-by-id RPC, so resolution goes through mt=1 search: a text search
  * matches titles/usernames/etc., and — because search does *not* index
  * UUIDs — a UUID-shaped ref falls back to a full enumeration.
+ *
+ * `databaseId` restricts the candidates to one database, so a title shared
+ * across vaults stops being ambiguous.
  */
-export async function resolveEntry(session: Session, ref: string): Promise<Credential> {
-  const byText = matchRef(await searchEntries(session, ref), ref);
+export async function resolveEntry(
+  session: Session,
+  ref: string,
+  databaseId?: string,
+): Promise<Credential> {
+  const inDb = (entries: readonly Credential[]): readonly Credential[] =>
+    databaseId === undefined ? entries : entries.filter((e) => e.databaseId === databaseId);
+
+  const byText = matchRef(inDb(await searchEntries(session, ref)), ref);
   if (byText) return byText;
   if (UUID_RE.test(ref)) {
-    const found = (await searchEntries(session, '')).find(
+    const found = inDb(await searchEntries(session, '')).find(
       (e) => e.uuid.toLowerCase() === ref.toLowerCase(),
     );
     if (found) return found;
   }
-  throw new UserError(`no entry matched "${ref}" (by UUID or exact title)`);
+  throw new UserError(
+    `no entry matched "${ref}" (by UUID or exact title)` +
+      (databaseId === undefined ? '' : ' in that database'),
+  );
+}
+
+/** Find a database by nickname or UUID, in any lock state. Throws if there is none. */
+export function requireDatabase(dbs: readonly DatabaseSummary[], ref: string): DatabaseSummary {
+  const db = dbs.find((d) => d.nickName === ref || d.uuid.toLowerCase() === ref.toLowerCase());
+  if (!db) {
+    throw new UserError(
+      `no database matched "${ref}" (have: ${dbs.map((d) => d.nickName).join(', ')})`,
+    );
+  }
+  return db;
+}
+
+/**
+ * Pick a database from the Hello summary. A ref matches nickname or UUID;
+ * with no ref, the sole unlocked database is used.
+ *
+ * A locked database is a hard error rather than an empty result: entry queries
+ * (mt=1/2/14) silently exclude locked databases, so without this check naming a
+ * locked vault looks identical to naming an empty one.
+ */
+export function resolveDatabase(
+  dbs: readonly DatabaseSummary[],
+  ref: string | undefined,
+): DatabaseSummary {
+  if (ref) {
+    const m = requireDatabase(dbs, ref);
+    if (m.locked) {
+      throw new NotRunningError(
+        `database "${ref}" is locked — unlock it in Strongbox first (or pass --unlock)`,
+      );
+    }
+    return m;
+  }
+  const unlocked = dbs.filter((d) => !d.locked);
+  if (unlocked.length === 1) return unlocked[0]!;
+  if (unlocked.length === 0) throw new NotRunningError('no unlocked database');
+  throw new UserError(
+    `multiple unlocked databases — pass --database (${unlocked.map((d) => d.nickName).join(', ')})`,
+  );
+}
+
+/**
+ * mt=5 blocks until the user finishes (or cancels) Strongbox's master-password
+ * / biometric prompt, so it needs a far longer deadline than a query. The cap
+ * exists only so a prompt nobody is watching can't hang the CLI forever.
+ */
+const UNLOCK_TIMEOUT_MS = 5 * 60_000;
+
+/**
+ * Ask Strongbox to unlock a database (mt=5), which raises its own prompt, and
+ * report whether the vault actually ended up unlocked.
+ *
+ * mt=5 does not return until the prompt resolves, and its ack carries the
+ * outcome: `{success: false}` for a cancelled prompt, `{success: true}` once
+ * unlocked (both confirmed 2026-08-13 — PROTOCOL.md §5.4).
+ */
+export async function unlockDatabase(session: Session, db: DatabaseSummary): Promise<boolean> {
+  const ack = await session.rpc(
+    MessageType.UnlockDatabase,
+    { databaseId: db.uuid },
+    UNLOCK_TIMEOUT_MS,
+  );
+  trace('unlock ack:', JSON.stringify(ack));
+  return ack.success;
+}
+
+/**
+ * Resolve a `--database` ref for a query command. `undefined` means "no
+ * restriction". With `unlock`, a locked target is prompted for rather than
+ * rejected — and a declined prompt still fails, because the query behind it
+ * would silently return nothing.
+ */
+export async function scopeDatabase(
+  session: Session,
+  ref: string | undefined,
+  unlock = false,
+): Promise<DatabaseSummary | undefined> {
+  if (ref === undefined) return undefined;
+  const { databases } = await session.rpc(MessageType.Hello, {});
+  if (!unlock) return resolveDatabase(databases, ref);
+
+  const db = requireDatabase(databases, ref);
+  if (db.locked && !(await unlockDatabase(session, db))) {
+    throw new NotRunningError(`database "${ref}" was not unlocked (prompt cancelled or failed)`);
+  }
+  return db;
 }
 
 /**

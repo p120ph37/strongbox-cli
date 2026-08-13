@@ -143,7 +143,7 @@ async function probeConnection(manifestPresent: boolean): Promise<Connection> {
         locked: d.locked,
         autoFillEnabled: d.autoFillEnabled,
         status: d.locked
-          ? 'locked (unlock in Strongbox to query)'
+          ? `locked (run: strongbox-cli unlock ${d.nickName})`
           : d.autoFillEnabled
             ? 'queryable'
             : 'database AutoFill disabled — entries are NOT exposed to the CLI',
